@@ -1,0 +1,18 @@
+# Cloudflare Worker — сервер напоминаний My Habits.
+# Разворачивается workflow .github/workflows/worker.yml (id KV подставляется автоматически).
+name = "my-habits-push"
+main = "index.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[kv_namespaces]]
+binding = "KV"
+id = "__KV_ID__"
+
+[vars]
+DATA_OWNER = "__DATA_OWNER__"
+DATA_REPO = "my-habits-data"
+DATA_PATH = "data.json"

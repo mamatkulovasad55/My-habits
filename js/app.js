@@ -2,21 +2,25 @@
 import {
   getData, getLocal, subscribe, update, updateLocal, replaceData, merge, emptyData, touch,
   habitsActive, habitsAll, abstainAll, findHabit, findAbstain, getLog, setLog,
+  getStageLog, setStageLog, getEvents, setNote, reorderHabits, mergeIntoStaged,
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
+import * as push from './push.js';
 import {
   goalOf, valueOf, progressOf, isDone, isScheduled, firstDay, doneInWeek, scheduleText, goalText,
   currentStreak, bestStreak, streakText, rateOf, totalCompletions, dayStats, rangeRate,
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
-  habitHeatValue, overallHeatValue, achievements,
+  habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
+import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM } from './schedule.js';
+import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
   weekdayLetter, openSheet, refreshLiveSheets, confirmSheet, toast, haptic, segmented,
 } from './ui.js';
 import {
-  dkey, parseKey, today, todayKey, addDays, startOfWeek, esc, plural, fmtDayLong, fmtDateShort, fmtDateTime,
+  uid, dkey, parseKey, today, todayKey, addDays, startOfWeek, esc, plural, fmtDayLong, fmtDateShort, fmtDateTime,
   fmtClock, fmtDuration, durationParts, pad, clamp, DAY_FORMS, MONTHS, WEEKDAYS_SHORT, stableStringify,
 } from './util.js';
 
@@ -62,13 +66,26 @@ function render() {
   animateRings(view);
   scrollHeatmaps(view);
   if (state.route === 'settings') mountSettings();
+  if (state.route === 'today') {
+    mountReorder();
+    const note = document.getElementById('day-note');
+    if (note) note.onchange = () => setNote(dkey(state.day), note.value.trim());
+  }
   refreshLiveSheets();
   tick();
 }
 
 function route() {
   const r = location.hash.replace('#', '');
+  if (r === 'checkin') {
+    history.replaceState(null, '', '#today');
+    state.route = 'today';
+    state.day = today();
+    render();
+    return openCheckin();
+  }
   state.route = ROUTES.includes(r) ? r : 'today';
+  state.reorder = false;
   render();
 }
 
@@ -146,13 +163,178 @@ function viewToday() {
     <nav class="week-strip">${strip}</nav>
     ${abstChips}
     ${summary}
+    ${namazBanner()}
+    ${state.reorder ? reorderList() : `
     ${due.length ? `<section class="list">${due.map((h) => habitCard(h, day)).join('')}</section>` : ''}
     ${other.length ? `<h3 class="section-title">Не по расписанию</h3><section class="list is-dim">${other.map((h) => habitCard(h, day)).join('')}</section>` : ''}
+    ${habits.length > 1 ? `<div class="list-tools"><button class="link-btn small" data-action="reorder">Изменить порядок</button>${isToday ? `<button class="link-btn small" data-action="checkin">🌙 Вечерний чек-ин</button>` : ''}</div>` : ''}
+    ${habits.length || abst.length ? `
+      <div class="group-title">Заметка дня</div>
+      <div class="card pad note-card"><textarea class="note-input" id="day-note" rows="2" placeholder="Как прошёл день? Что помогло, что мешало…">${esc(getData().notes[key]?.text || '')}</textarea></div>` : ''}`}
     ${empty}
   `;
 }
 
+// ---------- Объединение отдельных намазов ----------
+
+const NAMAZ_ALIASES = {
+  fajr: ['фаджр', 'фаджир', 'фajr', 'бомдод', 'утренний', 'сабах', 'fajr'],
+  dhuhr: ['зухр', 'зохр', 'пешин', 'обеденный', 'dhuhr', 'zuhr'],
+  asr: ['аср', 'asr'],
+  maghrib: ['магриб', 'шом', 'вечерний', 'maghrib'],
+  isha: ['иша', 'хуфтон', 'ночной', 'isha'],
+};
+
+function findNamazHabits() {
+  const found = [];
+  for (const h of habitsActive()) {
+    if (hasStages(h)) continue;
+    const n = h.name.toLowerCase().replace(/ё/g, 'е').replace(/намаз/g, '').trim();
+    for (const [k, list] of Object.entries(NAMAZ_ALIASES)) if (list.includes(n)) found.push({ h, prayer: k });
+  }
+  return found;
+}
+
+function namazBanner() {
+  if (state.reorder || dkey(state.day) !== todayKey()) return '';
+  try {
+    if (localStorage.getItem('myhabits:namaz-banner') === 'hide') return '';
+  } catch {
+    /* ignore */
+  }
+  const found = findNamazHabits();
+  if (found.length < 3) return '';
+  return `<section class="card pad banner">
+    <div class="banner-title">🕌 Объединить намазы в одну привычку?</div>
+    <p>Одна карточка «Намаз» с ${found.length === 5 ? '5 этапами' : 'этапами'}: время каждого намаза считается автоматически по твоему городу, напоминания приходят в начале намаза. Вся история сохранится.</p>
+    <div class="btn-row"><button class="btn btn-primary" data-action="merge-namaz">Объединить</button><button class="btn btn-secondary" data-action="hide-namaz">Не сейчас</button></div>
+  </section>`;
+}
+
+function mergeNamaz() {
+  const found = findNamazHabits();
+  const first = found[0]?.h;
+  const stages = PRAYERS.map((p) => ({ id: `p-${p.key}`, name: p.name, min: 1, max: 1, remind: true, time: { mode: 'prayer', prayer: p.key, minutes: 0 } }));
+  mergeIntoStaged(
+    { name: 'Намаз', emoji: first?.emoji || '🕌', color: first?.color || COLORS[3], type: 'check', target: 1, unit: '', step: 1, schedule: { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3 }, stages },
+    found.map((x) => ({ habitId: x.h.id, stageId: `p-${x.prayer}` })),
+  );
+  haptic(20);
+  toast('Готово: «Намаз» с 5 этапами');
+}
+
+// ---------- Порядок привычек (перетаскивание) ----------
+
+function reorderList() {
+  return `<div class="group-title">Перетащи за ≡, чтобы изменить порядок</div>
+    <section class="card list-group reorder" id="reorder">${habitsActive()
+      .map((h) => `<div class="row static ro-row" data-hid="${h.id}"><span class="emoji-chip" style="--c:${h.color}">${esc(h.emoji)}</span><div class="row-main"><b>${esc(h.name)}</b></div><span class="handle" aria-label="Перетащить">≡</span></div>`)
+      .join('')}</section>
+    <button class="btn btn-primary btn-block" data-action="reorder-done">Готово</button>`;
+}
+
+function mountReorder() {
+  const box = document.getElementById('reorder');
+  if (!box) return;
+  box.querySelectorAll('.handle').forEach((handle) => {
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const row = handle.closest('.ro-row');
+      const rows = [...box.querySelectorAll('.ro-row')];
+      const from = rows.indexOf(row);
+      const hgt = row.getBoundingClientRect().height;
+      const startY = e.clientY;
+      let to = from;
+      row.classList.add('is-dragging');
+      handle.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const dy = ev.clientY - startY;
+        row.style.transform = `translateY(${dy}px)`;
+        to = clamp(from + Math.round(dy / hgt), 0, rows.length - 1);
+        rows.forEach((r, i) => {
+          if (r === row) return;
+          let shift = 0;
+          if (from < to && i > from && i <= to) shift = -hgt;
+          if (from > to && i < from && i >= to) shift = hgt;
+          r.style.transform = shift ? `translateY(${shift}px)` : '';
+        });
+      };
+      const up = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', up);
+        handle.removeEventListener('pointercancel', up);
+        rows.forEach((r) => (r.style.transform = ''));
+        row.classList.remove('is-dragging');
+        if (to !== from) {
+          const ids = rows.map((r) => r.dataset.hid);
+          ids.splice(to, 0, ids.splice(from, 1)[0]);
+          haptic();
+          reorderHabits(ids);
+        }
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+      handle.addEventListener('pointercancel', up);
+    });
+  });
+}
+
+// ---------- Вечерний чек-ин ----------
+
+function openCheckin() {
+  openSheet({
+    live: true,
+    render: () => {
+      const key = todayKey();
+      const t = today();
+      const left = habitsActive().filter((h) => isScheduled(h, t) && !isDone(h, key));
+      const abst = abstainAll();
+      return `
+        <header class="sheet-header"><span></span><strong>Вечерний чек-ин</strong><button class="link-btn strong" data-c="close">Готово</button></header>
+        <div class="sheet-body">
+          <div class="group-title">${left.length ? 'Ещё не выполнено' : 'Привычки'}</div>
+          <div class="card list-group">${left.length
+            ? left.map((h) => `<button class="row" data-open="${h.id}"><span class="emoji-chip" style="--c:${h.color}">${esc(h.emoji)}</span><div class="row-main"><b>${esc(h.name)}</b><span class="muted">${h.type === 'check' && !hasStages(h) ? 'не отмечено' : `${fmtNum(valueOf(h, key))} из ${goalOf(h)}${hasStages(h) && h.type === 'check' ? ' этапов' : ''}`}</span></div>${icon.chevronR(18)}</button>`).join('')
+            : `<div class="row static"><span>Всё выполнено — отличный день! 🎉</span></div>`}</div>
+          ${abst.length ? `<div class="group-title">Воздержание сегодня</div>
+          <div class="card list-group">${abst.map((a) => {
+            const clean = isCleanDay(a, key);
+            return `<div class="row static"><span class="emoji-chip" style="--c:${a.color}">${esc(a.emoji)}</span><div class="row-main"><b>${esc(a.name)}</b><span class="muted">${esc(fmtDuration(abstainElapsed(a)))} без срыва</span></div><button class="pill ${clean ? 'is-on' : ''}" style="--c:${a.color}" data-clean="${a.id}">${clean ? '✓ Чистый' : 'Чистый день'}</button></div>`;
+          }).join('')}</div>` : ''}
+          <div class="group-title">Заметка дня</div>
+          <div class="card pad"><textarea class="note-input" data-c="note" rows="3" placeholder="Как прошёл день?">${esc(getData().notes[key]?.text || '')}</textarea></div>
+        </div>`;
+    },
+    mount: (api) => {
+      api.el.querySelector('[data-c=close]').onclick = () => api.close();
+      api.el.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => openHabitDetail(b.dataset.open)));
+      api.el.querySelectorAll('[data-clean]').forEach((b) => (b.onclick = () => toggleClean(b.dataset.clean)));
+      const note = api.el.querySelector('[data-c=note]');
+      note.onchange = () => setNote(todayKey(), note.value.trim());
+    },
+  });
+}
+
+const nowMin = () => {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+};
+
+/** Этап, который отмечает кнопка на карточке. */
+function tapStage(h, day) {
+  const isToday = dkey(day) === todayKey();
+  return currentStage(h, day, isToday ? nowMin() : 1440 * 2, dayContext(day));
+}
+
+function stageDots(h, day) {
+  const key = dkey(day);
+  return `<span class="stage-dots">${stagesForDay(h, day)
+    .map((s) => `<i class="${stageDone(h, key, s) ? 'is-done' : ''}" title="${esc(s.name)}"></i>`)
+    .join('')}</span>`;
+}
+
 function habitCard(h, day) {
+  if (hasStages(h)) return stagedCard(h, day);
   const key = dkey(day);
   const isToday = key === todayKey();
   const running = isToday && getLocal().timers?.[h.id];
@@ -176,11 +358,46 @@ function habitCard(h, day) {
     action = `<button class="act act-check ${done ? 'is-done' : ''}" style="--c:${h.color}" data-action="habit-tap" data-id="${h.id}" aria-label="${done ? 'Снять отметку' : 'Отметить'}">${icon.check(18)}</button>`;
   }
 
-  return `<article class="hcard ${done ? 'is-done' : ''}" data-action="open-habit" data-id="${h.id}" style="--c:${h.color}">
+  return `<article class="hcard ${done ? 'is-done' : ''}" data-action="open-habit" data-id="${h.id}" data-hid="${h.id}" style="--c:${h.color}">
     ${ring(v / g, { size: 46, stroke: 4.5, color: h.color, key: `h-${h.id}-${key}`, inner: `<span class="emoji">${esc(h.emoji)}</span>` })}
     <div class="hmain">
       <div class="hname">${esc(h.name)}</div>
       <div class="hsub">${sub.join('<span class="dot">·</span>')}</div>
+    </div>
+    ${action}
+  </article>`;
+}
+
+function stagedCard(h, day) {
+  const key = dkey(day);
+  const v = valueOf(h, key);
+  const g = goalOf(h);
+  const done = v >= g;
+  const ctx = dayContext(day);
+  const st = tapStage(h, day);
+  const sub = [];
+  if (h.type === 'count') sub.push(`${fmtNum(v)} / ${h.target} ${esc(h.unit || '')}`.trim());
+  if (st) {
+    const t = st.start != null ? fmtMin(st.start) : '';
+    const amount = h.type === 'count' ? ` · ${st.max && st.max !== st.min ? `${st.min}–${st.max}` : st.min}` : '';
+    sub.push(`<span class="next-stage">${esc(st.name)}${t ? ` ${t}` : ''}${amount}</span>`);
+  } else if (!done) {
+    sub.push('все этапы отмечены');
+  }
+  const cs = currentStreak(h);
+  if (cs.value > 0) sub.push(`<span class="streak">${icon.flame(13)} ${streakText(cs)}</span>`);
+  void ctx;
+
+  const action = st
+    ? `<button class="act ${h.type === 'check' ? 'act-check' : ''}" style="--c:${h.color}" data-action="habit-tap" data-id="${h.id}" aria-label="Отметить: ${esc(st.name)}">${h.type === 'check' ? icon.check(18) : icon.plus(18)}</button>`
+    : `<button class="act act-check is-done" style="--c:${h.color}" data-action="open-habit" data-id="${h.id}" aria-label="Подробнее">${icon.check(18)}</button>`;
+
+  return `<article class="hcard ${done ? 'is-done' : ''}" data-action="open-habit" data-id="${h.id}" data-hid="${h.id}" style="--c:${h.color}">
+    ${ring(v / g, { size: 46, stroke: 4.5, color: h.color, key: `h-${h.id}-${key}`, inner: `<span class="emoji">${esc(h.emoji)}</span>` })}
+    <div class="hmain">
+      <div class="hname">${esc(h.name)}</div>
+      <div class="hsub">${sub.join('<span class="dot">·</span>')}</div>
+      ${stageDots(h, day)}
     </div>
     ${action}
   </article>`;
@@ -194,19 +411,28 @@ function habitTap(id) {
   const v = valueOf(h, key);
   const g = goalOf(h);
   haptic();
-  if (h.type === 'check') return setLog(id, key, v >= 1 ? 0 : 1);
-  if (h.type === 'count') {
-    if (v >= g) return setLog(id, key, 0);
-    return setLog(id, key, v + (Number(h.step) || 1));
-  }
-  if (h.type === 'timer') {
-    if (!isToday || v >= g) {
-      if (v >= g) {
-        stopTimer(id);
-        return setLog(id, key, 0);
-      }
-      return openHabitDetail(id);
+  if (hasStages(h)) {
+    const st = tapStage(h, state.day);
+    if (!st) return openHabitDetail(id);
+    const cur = getStageLog(id, key, st.id);
+    if (h.type === 'check') {
+      setStageLog(id, key, st.id, 1);
+      return toast(`${st.name} отмечен`, { action: 'Отменить', onAction: () => setStageLog(id, key, st.id, cur) });
     }
+    return setStageLog(id, key, st.id, cur + (Number(h.step) || 1));
+  }
+  if (h.type === 'check') {
+    if (v >= 1) {
+      setLog(id, key, 0);
+      return toast('Отметка снята', { action: 'Вернуть', onAction: () => setLog(id, key, 1) });
+    }
+    return setLog(id, key, 1);
+  }
+  // выполненную привычку не обнуляем случайным нажатием — открываем карточку
+  if (v >= g) return openHabitDetail(id);
+  if (h.type === 'count') return setLog(id, key, v + (Number(h.step) || 1));
+  if (h.type === 'timer') {
+    if (!isToday) return openHabitDetail(id);
     return toggleTimer(id);
   }
 }
@@ -247,7 +473,9 @@ function openHabitDetail(id) {
       const dayLabel = isToday ? 'Сегодня' : fmtDateShort(day);
 
       let editor = '';
-      if (h.type === 'check') {
+      if (hasStages(h)) {
+        editor = stageEditor(h, day);
+      } else if (h.type === 'check') {
         editor = `<button class="btn btn-block ${v >= 1 ? 'btn-tinted' : 'btn-primary'}" style="--c:${h.color}" data-d="toggle">${v >= 1 ? `${icon.check(18)} Выполнено` : 'Отметить выполненной'}</button>`;
       } else if (h.type === 'count') {
         editor = `<div class="stepper-big">
@@ -292,6 +520,7 @@ function openHabitDetail(id) {
           </div>
           <div class="group-title">Последний год</div>
           <div class="card pad">${heatmap(habitHeatValue(h), h.color)}</div>
+          ${timeStatsCard(h)}
           <div class="card list-group">
             <button class="row" data-d="archive">${icon.archive(20)}<span>${h.archived ? 'Вернуть из архива' : 'В архив'}</span></button>
             <button class="row is-danger" data-d="delete">${icon.trash(20)}<span>Удалить привычку</span></button>
@@ -315,6 +544,15 @@ function openHabitDetail(id) {
       if (q('add5')) q('add5').onclick = () => setLog(id, key, getLog(id, key) + 300);
       if (q('sub5')) q('sub5').onclick = () => setLog(id, key, Math.max(0, getLog(id, key) - 300));
       if (q('reset')) q('reset').onclick = () => (stopTimer(id), setLog(id, key, 0));
+      api.el.querySelectorAll('[data-st]').forEach((b) => (b.onclick = () => {
+        haptic();
+        const sid = b.dataset.st;
+        const cur = getStageLog(id, key, sid);
+        const step = Number(h.step) || 1;
+        if (b.dataset.op === 'inc') setStageLog(id, key, sid, cur + step);
+        else if (b.dataset.op === 'dec') setStageLog(id, key, sid, Math.max(0, cur - step));
+        else setStageLog(id, key, sid, cur >= 1 ? 0 : 1);
+      }));
       q('archive').onclick = () => {
         upsertHabit({ id, archived: !h.archived });
         if (!h.archived) {
@@ -339,6 +577,39 @@ function openHabitDetail(id) {
   });
 }
 
+function stageEditor(h, day) {
+  const key = dkey(day);
+  const list = stagesForDay(h, day);
+  return `<div class="stage-list">${list.map((s) => {
+    const val = getStageLog(h.id, key, s.id);
+    const ok = stageDone(h, key, s);
+    const ev = getEvents(h.id, key).filter((e) => e.s === s.id && e.d > 0).pop();
+    const when = ok && ev ? `отмечено в ${fmtMin(new Date(ev.ts).getHours() * 60 + new Date(ev.ts).getMinutes())}` : s.start != null ? `${fmtMin(s.start)}${s.end != null && s.time?.mode === 'prayer' ? `–${fmtMin(s.end)}` : ''}` : '';
+    const range = s.max && s.max !== s.min ? `${s.min}–${s.max}` : `${s.min}`;
+    const control = h.type === 'count'
+      ? `<div class="mini-stepper"><button class="round-btn sm" data-st="${s.id}" data-op="dec" aria-label="Меньше">${icon.minus(14)}</button><span class="${ok ? 'is-ok' : ''}">${fmtNum(val)}<small>/${range}</small></span><button class="round-btn sm" style="--c:${h.color}" data-st="${s.id}" data-op="inc" aria-label="Больше">${icon.plus(14)}</button></div>`
+      : `<button class="act act-check ${ok ? 'is-done' : ''}" style="--c:${h.color}" data-st="${s.id}" aria-label="Отметить">${icon.check(16)}</button>`;
+    return `<div class="stage-row ${ok ? 'is-ok' : ''}"><div class="row-main"><b>${esc(s.name)}</b><span class="muted">${esc(when)}</span></div>${control}</div>`;
+  }).join('')}</div>`;
+}
+
+function hoursChart(hours, color) {
+  const max = Math.max(1, ...hours);
+  return `<div class="hours">${barChart(hours.map((v, i) => ({ label: i % 6 === 0 ? String(i) : '', value: v ? v / max : null })), { color, height: 64 })}</div>`;
+}
+
+function timeStatsCard(h) {
+  const t = timeStats(h, 60);
+  if (!t.total) return '';
+  const rows = t.stages.filter((s) => s.count).map((s) => {
+    const all = s.onTime + s.late;
+    return `<div class="row static"><div class="row-main"><b>${esc(s.name)}</b><span class="muted">обычно в ${fmtMin(s.median)} · отмечено ${s.count} ${plural(s.count, ['раз', 'раза', 'раз'])}</span></div>${all ? `<span class="row-val ${s.onTime / all >= 0.7 ? 'good' : ''}">${Math.round((s.onTime / all) * 100)}% вовремя</span>` : ''}</div>`;
+  }).join('');
+  return `<div class="group-title">Когда ты отмечаешь · 60 дней</div>
+    <div class="card pad">${hoursChart(t.hours, h.color)}${t.median != null ? `<p class="hint center">Обычно выполняешь около <b>${fmtMin(t.median)}</b></p>` : ''}</div>
+    ${rows ? `<div class="card list-group">${rows}</div>` : ''}`;
+}
+
 // ============================================================
 // Редактор привычки
 // ============================================================
@@ -350,6 +621,9 @@ function openHabitEditor(existing) {
     : { name: '', emoji: '💧', color: COLORS[7], type: 'check', target: 8, unit: '', step: 1, schedule: { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3 } };
   f.schedule = { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3, ...(f.schedule || {}) };
   if (f.type === 'timer' && !existing) f.target = 30;
+  f.stages = Array.isArray(f.stages) ? f.stages : [];
+  f.useStages = f.stages.length > 0;
+  f.reminders = Array.isArray(f.reminders) ? f.reminders : [];
 
   openSheet({
     render: () => `
@@ -395,6 +669,7 @@ function openHabitEditor(existing) {
           ${f.schedule.kind === 'weekdays' ? `<div class="chips">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="chip ${f.schedule.days.includes(d) ? 'is-active' : ''}" style="--c:${f.color}" data-wd="${d}">${WEEKDAYS_SHORT[d]}</button>`).join('')}</div>` : ''}
           ${f.schedule.kind === 'perWeek' ? `<div class="inline-stepper"><button class="round-btn sm" data-e="tm">${icon.minus(16)}</button><span><b>${f.schedule.times}</b> ${plural(f.schedule.times, ['раз', 'раза', 'раз'])} в неделю</span><button class="round-btn sm" data-e="tp">${icon.plus(16)}</button></div>` : ''}
         </div>
+        ${stagesSection(f)}
       </div>`,
     mount: (api) => {
       const el = api.el;
@@ -432,6 +707,7 @@ function openHabitEditor(existing) {
         if (s.size) f.schedule.days = [...s];
         api.refresh();
       }));
+      mountStagesSection(el, f, api);
       if (q('tm')) q('tm').onclick = () => ((f.schedule.times = clamp(f.schedule.times - 1, 1, 6)), api.refresh());
       if (q('tp')) q('tp').onclick = () => ((f.schedule.times = clamp(f.schedule.times + 1, 1, 6)), api.refresh());
       saveBtn.onclick = () => {
@@ -445,6 +721,15 @@ function openHabitEditor(existing) {
           unit: f.type === 'count' ? String(f.unit || '').trim() : '',
           step: f.type === 'count' ? Math.max(0.1, Number(String(f.step).replace(',', '.')) || 1) : 1,
           schedule: { kind: f.schedule.kind, days: [...f.schedule.days].sort(), times: f.schedule.times },
+          stages: f.type !== 'timer' && f.useStages ? f.stages.filter((x) => x.name.trim()).map((x) => ({
+            id: x.id || uid(),
+            name: x.name.trim(),
+            min: f.type === 'count' ? Math.max(1, Number(x.min) || 1) : 1,
+            max: f.type === 'count' ? Math.max(Number(x.min) || 1, Number(x.max) || Number(x.min) || 1) : 1,
+            remind: x.remind !== false,
+            time: x.time,
+          })) : [],
+          reminders: f.useStages && f.type !== 'timer' ? [] : f.reminders,
         };
         if (existing) out.id = existing.id;
         upsertHabit(out);
@@ -454,6 +739,118 @@ function openHabitEditor(existing) {
       if (isNew && !f.name) setTimeout(() => q('name')?.focus(), 320);
     },
   });
+}
+
+// ---------- Этапы и напоминания в редакторе ----------
+
+const MODE_OPTS = [
+  ['fixed', 'Точное время'],
+  ['afterWake', 'После подъёма'],
+  ['beforeSleep', 'До сна'],
+  ['prayer', 'Время намаза'],
+];
+
+function timePicker(t, path) {
+  const mode = t.mode || 'fixed';
+  let extra = '';
+  if (mode === 'fixed') extra = `<input class="field" type="time" data-tp="${path}" data-tf="at" value="${esc(t.at || '09:00')}">`;
+  else if (mode === 'prayer') {
+    extra = `<select class="field" data-tp="${path}" data-tf="prayer">${PRAYERS.map((p) => `<option value="${p.key}" ${t.prayer === p.key ? 'selected' : ''}>${p.name}</option>`).join('')}</select>
+      <label class="unit-field"><input class="field" type="number" inputmode="numeric" data-tp="${path}" data-tf="minutes" value="${esc(t.minutes || 0)}"><span>мин</span></label>`;
+  } else {
+    extra = `<label class="unit-field"><input class="field" type="number" min="0" inputmode="numeric" data-tp="${path}" data-tf="minutes" value="${esc(t.minutes || 0)}"><span>${mode === 'afterWake' ? 'мин после' : 'мин до'}</span></label>`;
+  }
+  return `<div class="time-picker"><select class="field" data-tp="${path}" data-tf="mode">${MODE_OPTS.map(([v, l]) => `<option value="${v}" ${v === mode ? 'selected' : ''}>${l}</option>`).join('')}</select>${extra}</div>`;
+}
+
+const WATER_TEMPLATE = [
+  ['После пробуждения', 1, 2, { mode: 'afterWake', minutes: 10 }],
+  ['Завтрак', 1, 1, { mode: 'afterWake', minutes: 45 }],
+  ['Середина утра', 1, 1, { mode: 'afterWake', minutes: 180 }],
+  ['Обед', 1, 1, { mode: 'fixed', at: '13:00' }],
+  ['День', 1, 2, { mode: 'fixed', at: '16:00' }],
+  ['Вечер', 1, 2, { mode: 'beforeSleep', minutes: 90 }],
+];
+
+function stagesSection(f) {
+  if (f.type === 'timer') return remindersSection(f);
+  const stages = f.stages
+    .map((st, i) => `<div class="stage-edit">
+      <div class="stage-edit-top">
+        <input class="field" data-si="${i}" data-sf="name" value="${esc(st.name)}" placeholder="Название этапа" maxlength="30">
+        <button class="icon-btn sm danger" data-sdel="${i}" aria-label="Удалить этап">${icon.close(16)}</button>
+      </div>
+      ${f.type === 'count' ? `<div class="minmax"><label><span>мин.</span><input class="field" type="number" min="1" inputmode="numeric" data-si="${i}" data-sf="min" value="${esc(st.min ?? 1)}"></label><label><span>макс.</span><input class="field" type="number" min="1" inputmode="numeric" data-si="${i}" data-sf="max" value="${esc(st.max ?? st.min ?? 1)}"></label><span class="muted small">${esc(f.unit || '')}</span></div>` : ''}
+      ${timePicker(st.time || {}, `s${i}`)}
+      <label class="switch-row"><span>Напоминать</span><input type="checkbox" class="switch" data-si="${i}" data-sf="remind" ${st.remind !== false ? 'checked' : ''}></label>
+    </div>`)
+    .join('');
+  return `
+    <div class="group-title">Этапы в течение дня</div>
+    <div class="card pad">
+      <label class="switch-row"><span><b>Разбить на этапы</b><br><span class="muted small">Например, 5 намазов или вода: утро, обед, вечер</span></span><input type="checkbox" class="switch" data-e="useStages" ${f.useStages ? 'checked' : ''}></label>
+      ${f.useStages ? `
+        ${stages}
+        <div class="btn-row">
+          <button class="btn btn-secondary" data-e="addStage">${icon.plus(16)} Этап</button>
+          ${f.type === 'check' ? `<button class="btn btn-secondary" data-e="tplNamaz">🕌 5 намазов</button>` : `<button class="btn btn-secondary" data-e="tplWater">💧 Вода по режиму</button>`}
+        </div>
+        <p class="hint">${f.type === 'count' ? 'Этап засчитан, когда выполнен минимум; всё сверх — в общий счёт дня.' : 'Привычка выполнена, когда отмечены все этапы.'} Время «после подъёма» и «до сна» берётся из Настроек → Режим дня.</p>` : ''}
+    </div>
+    ${f.useStages ? '' : remindersSection(f)}`;
+}
+
+function remindersSection(f) {
+  return `
+    <div class="group-title">Напоминания</div>
+    <div class="card pad">
+      ${f.reminders.map((r, i) => `<div class="reminder-row">${timePicker(r, `r${i}`)}<button class="icon-btn sm danger" data-rdel="${i}" aria-label="Удалить">${icon.close(16)}</button></div>`).join('')}
+      <button class="btn btn-secondary" data-e="addReminder">${icon.plus(16)} Напоминание</button>
+      <p class="hint">Не приходят, если привычка уже выполнена. Нужно подключить уведомления в Настройках.</p>
+    </div>`;
+}
+
+function mountStagesSection(el, f, api) {
+  const target = (path) => (path[0] === 's' ? (f.stages[+path.slice(1)].time = f.stages[+path.slice(1)].time || { mode: 'fixed', at: '09:00' }) : f.reminders[+path.slice(1)]);
+  el.querySelectorAll('[data-tp]').forEach((inp) => {
+    inp.onchange = () => {
+      const t = target(inp.dataset.tp);
+      const field = inp.dataset.tf;
+      t[field] = field === 'minutes' ? Number(inp.value) || 0 : inp.value;
+      if (field === 'mode') {
+        if (t.mode === 'prayer' && !t.prayer) t.prayer = 'fajr';
+        if (t.mode === 'fixed' && !t.at) t.at = '09:00';
+        api.refresh();
+      }
+    };
+  });
+  el.querySelectorAll('[data-sf]').forEach((inp) => {
+    const st = f.stages[+inp.dataset.si];
+    const field = inp.dataset.sf;
+    if (field === 'remind') inp.onchange = () => (st.remind = inp.checked);
+    else inp.oninput = () => (st[field] = field === 'name' ? inp.value : Number(inp.value) || 1);
+  });
+  el.querySelectorAll('[data-sdel]').forEach((b) => (b.onclick = () => (f.stages.splice(+b.dataset.sdel, 1), api.refresh())));
+  el.querySelectorAll('[data-rdel]').forEach((b) => (b.onclick = () => (f.reminders.splice(+b.dataset.rdel, 1), api.refresh())));
+  const q = (s) => el.querySelector(`[data-e=${s}]`);
+  if (q('useStages')) q('useStages').onchange = (e) => {
+    f.useStages = e.target.checked;
+    if (f.useStages && !f.stages.length) f.stages.push({ id: uid(), name: 'Утро', min: 1, max: 1, remind: true, time: { mode: 'afterWake', minutes: 0 } });
+    api.refresh();
+  };
+  if (q('addStage')) q('addStage').onclick = () => (f.stages.push({ id: uid(), name: '', min: 1, max: 1, remind: true, time: { mode: 'fixed', at: '12:00' } }), api.refresh());
+  if (q('addReminder')) q('addReminder').onclick = () => (f.reminders.push({ mode: 'fixed', at: '09:00' }), api.refresh());
+  if (q('tplNamaz')) q('tplNamaz').onclick = () => {
+    f.stages = PRAYERS.map((p) => ({ id: `p-${p.key}`, name: p.name, min: 1, max: 1, remind: true, time: { mode: 'prayer', prayer: p.key, minutes: 0 } }));
+    if (!f.name.trim()) f.name = 'Намаз';
+    api.refresh();
+  };
+  if (q('tplWater')) q('tplWater').onclick = () => {
+    f.stages = WATER_TEMPLATE.map(([name, min, max, time]) => ({ id: uid(), name, min, max, remind: true, time: { ...time } }));
+    if (!f.unit) f.unit = 'стаканов';
+    if (!f.name.trim()) f.name = 'Вода';
+    api.refresh();
+  };
 }
 
 // ============================================================
@@ -781,12 +1178,25 @@ function viewStats() {
     <div class="card pad">${barChart(bars, { color: 'var(--green)' })}</div>
     <div class="group-title">Год</div>
     <div class="card pad">${heatmap(overallHeatValue(), 'var(--green)')}</div>
+    ${hoursOverview()}
     <div class="group-title">Привычки · за 30 дней</div>
     <div class="card list-group">${habitRows}</div>` : ''}
     ${abst.length ? `<div class="group-title">Воздержание</div><div class="card list-group">${abstRows}</div>` : ''}
     <div class="group-title">Достижения · ${unlocked} из ${ach.list.length}</div>
     <div class="ach-grid">${ach.list.map((x) => `<div class="ach ${x.ok ? 'is-ok' : ''}"><div class="ach-emoji">${x.emoji}</div><b>${esc(x.title)}</b><span>${esc(x.desc)}</span></div>`).join('')}</div>
   `;
+}
+
+function hoursOverview() {
+  const hours = overallHours(30);
+  const total = hours.reduce((a, b) => a + b, 0);
+  if (!total) return '';
+  const peak = hours.indexOf(Math.max(...hours));
+  const morning = hours.slice(5, 12).reduce((a, b) => a + b, 0);
+  const evening = hours.slice(18, 24).reduce((a, b) => a + b, 0);
+  return `<div class="group-title">Когда ты отмечаешь · 30 дней</div>
+    <div class="card pad">${hoursChart(hours, 'var(--accent)')}
+      <p class="hint center">Чаще всего — с ${pad(peak)}:00 до ${pad((peak + 1) % 24)}:00 · утром ${Math.round((morning / total) * 100)}%, вечером ${Math.round((evening / total) * 100)}%</p></div>`;
 }
 
 // ============================================================
@@ -831,6 +1241,10 @@ function viewSettings() {
       <p class="hint">Токен хранится только в этом браузере. Создай fine-grained токен с доступом <b>только</b> к репозиторию данных и правом <b>Contents: Read and write</b>. Подробная инструкция — в README репозитория.</p>
     </div>
 
+    ${notificationsSection()}
+    ${routineSection()}
+    ${prayerSection()}
+
     <div class="group-title">Оформление</div>
     <div class="card pad">${segmented('theme', [{ value: 'system', label: 'Как в системе' }, { value: 'light', label: 'Светлая' }, { value: 'dark', label: 'Тёмная' }], theme)}</div>
 
@@ -853,7 +1267,168 @@ function viewSettings() {
   `;
 }
 
+// ---------- Настройки: уведомления, режим дня, намаз ----------
+
+function notificationsSection() {
+  const st = getData().settings;
+  const d = (state.pushDraft = state.pushDraft || { url: st.push.workerUrl || '', key: push.getKey() });
+  return `
+    <div class="group-title">Уведомления</div>
+    <div class="card pad">
+      <div class="sync-status" id="push-status"><span class="status-dot" style="background:var(--gray)"></span><span>Проверяю…</span></div>
+      <div class="form-grid one">
+        <label><span>Адрес сервера уведомлений</span><input class="field" data-p="url" value="${esc(d.url)}" placeholder="https://my-habits-push.….workers.dev" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="url"></label>
+        <label><span>Ключ подключения</span><input class="field" type="password" data-p="key" value="${esc(d.key)}" placeholder="фраза из секрета PUSH_KEY" autocomplete="off"></label>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" data-p="enable">Включить на этом устройстве</button>
+        <button class="btn btn-secondary" data-p="test">Тест</button>
+      </div>
+      <button class="link-btn danger mt" data-p="disable">Отключить на этом устройстве</button>
+      <div class="settings-rows">
+        <label class="switch-row"><span>Повторять, если не отмечено</span>
+          <select class="field compact" data-set="repeatMin" data-num>${[0, 15, 30, 45, 60, 90].map((m) => `<option value="${m}" ${Number(st.repeatMin) === m ? 'selected' : ''}>${m ? `через ${m} мин` : 'нет'}</option>`).join('')}</select></label>
+        <label class="switch-row"><span>Вечерний чек-ин</span><span class="inline"><input type="time" class="field compact" data-set="checkin.time" value="${esc(st.checkin.time)}"><input type="checkbox" class="switch" data-set-bool="checkin.enabled" ${st.checkin.enabled ? 'checked' : ''}></span></label>
+      </div>
+      <p class="hint">Для намаза повтор приходит за 25 минут до конца его времени. Как поднять сервер (5 минут, бесплатно) — в README репозитория.</p>
+    </div>`;
+}
+
+function routineSection() {
+  const st = getData().settings;
+  const t = (label, path) => `<label><span>${label}</span><input class="field" type="time" data-set="${path}" value="${esc(path.split('.').reduce((o, k) => o?.[k], st) || '')}"></label>`;
+  return `
+    <div class="group-title">Режим дня</div>
+    <div class="card pad">
+      <div class="form-grid">
+        ${t('Подъём · будни', 'wakeWd')}${t('Сон · будни', 'sleepWd')}
+        ${t('Подъём · выходные', 'wakeWe')}${t('Сон · выходные', 'sleepWe')}
+      </div>
+      <label class="switch-row mt"><span>Тихие часы<br><span class="muted small">Ночью приходят только напоминания о намазе</span></span><input type="checkbox" class="switch" data-set-bool="quiet.enabled" ${st.quiet.enabled ? 'checked' : ''}></label>
+      ${st.quiet.enabled ? `<div class="form-grid">${t('С', 'quiet.from')}${t('До', 'quiet.to')}</div>` : ''}
+      <p class="hint">Часовой пояс: ${esc(st.tz || '—')}. Этапы «после подъёма» и «до сна» считаются от этих времён.</p>
+    </div>`;
+}
+
+function prayerSection() {
+  const st = getData().settings;
+  const p = st.prayer;
+  const ctx = dayContext(today());
+  const known = CITIES.some(([n]) => n === p.city);
+  const rows = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha']
+    .map((k) => `<div class="prayer-row ${k === 'sunrise' ? 'is-sub' : ''}"><span>${PRAYER_NAME[k]}</span><b>${fmtMin(ctx.prayers[k])}</b>
+      <span class="adj"><button class="round-btn sm" data-adj="${k}" data-delta="-1" aria-label="Раньше">${icon.minus(14)}</button><span>${(p.adj?.[k] || 0) > 0 ? '+' : ''}${p.adj?.[k] || 0}</span><button class="round-btn sm" data-adj="${k}" data-delta="1" aria-label="Позже">${icon.plus(14)}</button></span></div>`)
+    .join('');
+  return `
+    <div class="group-title">Время намаза</div>
+    <div class="card pad">
+      <div class="inline-fields">
+        <select class="field" data-pr="city">${CITIES.map(([n]) => `<option ${n === p.city ? 'selected' : ''}>${n}</option>`).join('')}<option value="__custom" ${known ? '' : 'selected'}>${known ? 'Свои координаты' : esc(p.city || 'Свои координаты')}</option></select>
+        <button class="btn btn-secondary" data-pr="geo">📍 Где я</button>
+      </div>
+      ${known ? '' : `<div class="form-grid"><label><span>Широта</span><input class="field" type="number" step="any" data-set="prayer.lat" data-num value="${esc(p.lat)}"></label><label><span>Долгота</span><input class="field" type="number" step="any" data-set="prayer.lon" data-num value="${esc(p.lon)}"></label></div>`}
+      <div class="prayer-table">${rows}</div>
+      <p class="hint">Сегодня, ${esc(p.city || '')}. Кнопки ± сдвигают время на минуту — сверь с расписанием своей мечети или namozvaqti.uz.</p>
+      <details class="advanced"><summary>Метод расчёта</summary>
+        <div class="form-grid">
+          <label><span>Угол Фаджра, °</span><input class="field" type="number" step="0.5" data-set="prayer.fajrAngle" data-num value="${esc(p.fajrAngle)}"></label>
+          <label><span>Угол Иши, °</span><input class="field" type="number" step="0.5" data-set="prayer.ishaAngle" data-num value="${esc(p.ishaAngle)}"></label>
+        </div>
+        <div class="mt">${segmented('asr', [{ value: 'hanafi', label: 'Аср: ханафитский' }, { value: 'shafi', label: 'Аср: шафиитский' }], p.asr)}</div>
+      </details>
+    </div>`;
+}
+
+async function refreshPushStatus() {
+  const el = document.getElementById('push-status');
+  if (!el) return;
+  let st;
+  try {
+    st = await push.status();
+  } catch {
+    st = { state: 'off' };
+  }
+  const map = {
+    on: ['green', 'Включены на этом устройстве'],
+    off: ['gray', 'Выключены на этом устройстве'],
+    denied: ['red', 'Запрещены в настройках телефона — разреши уведомления для приложения'],
+    'need-home': ['orange', 'На iPhone: «Поделиться» → «На экран „Домой“», затем открой приложение с экрана «Домой»'],
+    unsupported: ['red', 'Этот браузер не поддерживает уведомления'],
+  };
+  const [c, text] = map[st.state] || map.off;
+  el.innerHTML = `<span class="status-dot" style="background:var(--${c})"></span><span>${esc(text)}</span>`;
+}
+
+function mountPrefs() {
+  const pd = state.pushDraft;
+  view.querySelectorAll('[data-p=url],[data-p=key]').forEach((inp) => (inp.oninput = () => (pd[inp.dataset.p] = inp.value.trim())));
+  const btn = (k) => view.querySelector(`[data-p=${k}]`);
+  btn('enable').onclick = async () => {
+    btn('enable').disabled = true;
+    try {
+      await push.enable(pd.url, pd.key);
+      if (getData().settings.push.workerUrl !== pd.url) setSetting('push.workerUrl', pd.url);
+      toast('Уведомления включены ✅');
+    } catch (e) {
+      toast(e.message || 'Не удалось включить', { ms: 6000 });
+    }
+    btn('enable').disabled = false;
+    refreshPushStatus();
+  };
+  btn('test').onclick = async () => {
+    try {
+      const r = await push.test(pd.url);
+      toast(`Отправлено на ${r.sent} ${plural(r.sent, ['устройство', 'устройства', 'устройств'])}`);
+    } catch (e) {
+      toast(e.message || 'Ошибка', { ms: 5000 });
+    }
+  };
+  btn('disable').onclick = async () => {
+    await push.disable(pd.url);
+    toast('Уведомления на этом устройстве выключены');
+    refreshPushStatus();
+  };
+  view.querySelectorAll('[data-set]').forEach((inp) => (inp.onchange = () => {
+    const v = 'num' in inp.dataset ? Number(inp.value) : inp.value;
+    if ('num' in inp.dataset && !Number.isFinite(v)) return;
+    setSetting(inp.dataset.set, v);
+  }));
+  view.querySelectorAll('[data-set-bool]').forEach((inp) => (inp.onchange = () => setSetting(inp.dataset.setBool, inp.checked)));
+  view.querySelectorAll('[data-adj]').forEach((b) => (b.onclick = () => {
+    const k = b.dataset.adj;
+    setSetting(`prayer.adj.${k}`, (getData().settings.prayer.adj?.[k] || 0) + Number(b.dataset.delta));
+  }));
+  view.querySelectorAll('[data-seg=asr] button').forEach((b) => (b.onclick = () => setSetting('prayer.asr', b.dataset.value)));
+  const city = view.querySelector('[data-pr=city]');
+  city.onchange = () => {
+    const c = CITIES.find(([n]) => n === city.value);
+    update((d) => {
+      d.settings.prayer = c ? { ...d.settings.prayer, city: c[0], lat: c[1], lon: c[2] } : { ...d.settings.prayer, city: 'Свои координаты' };
+      d.settings.updatedAt = Date.now();
+    });
+  };
+  view.querySelector('[data-pr=geo]').onclick = () => {
+    if (!navigator.geolocation) return toast('Геолокация недоступна');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Math.round(pos.coords.latitude * 10000) / 10000;
+        const lon = Math.round(pos.coords.longitude * 10000) / 10000;
+        const near = CITIES.map(([n, la, lo]) => [n, Math.hypot(la - lat, lo - lon)]).sort((a, b) => a[1] - b[1])[0];
+        update((d) => {
+          d.settings.prayer = { ...d.settings.prayer, lat, lon, city: near && near[1] < 0.3 ? near[0] : 'Мои координаты' };
+          d.settings.updatedAt = Date.now();
+        });
+        toast('Координаты обновлены');
+      },
+      () => toast('Не удалось определить местоположение'),
+      { timeout: 10000 },
+    );
+  };
+  refreshPushStatus();
+}
+
 function mountSettings() {
+  mountPrefs();
   const q = (s) => view.querySelector(`[data-s=${s}]`);
   const d = state.settingsDraft;
   ['owner', 'repo', 'path', 'token'].forEach((k) => (q(k).oninput = (e) => (d[k] = e.target.value.trim())));
@@ -958,6 +1533,17 @@ document.addEventListener('click', (e) => {
       }
       return;
     }
+    case 'reorder': state.reorder = true; return render();
+    case 'reorder-done': state.reorder = false; return render();
+    case 'checkin': return openCheckin();
+    case 'merge-namaz': return mergeNamaz();
+    case 'hide-namaz':
+      try {
+        localStorage.setItem('myhabits:namaz-banner', 'hide');
+      } catch {
+        /* ignore */
+      }
+      return render();
     case 'add-abstain': return openAbstainEditor();
     case 'open-abstain': return openAbstainDetail(id);
     case 'clean-today': e.stopPropagation(); return toggleClean(id);
@@ -1028,6 +1614,14 @@ subscribe(() => {
 onLocalChange(() => sync.schedule());
 window.addEventListener('hashchange', route);
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && tick());
+
+// часовой пояс устройства — для расчёта напоминаний на сервере
+try {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (tz && !getData().settings.tz) setSetting('tz', tz);
+} catch {
+  /* ignore */
+}
 
 route();
 sync.initSync();
