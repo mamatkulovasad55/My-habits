@@ -1083,4 +1083,17 @@ select.field.compact { padding-right: 30px; }
 .pill.is-on { background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); }
 .switch-row > span:first-child { min-width: 0; }
 select.field.compact { flex: none; width: 150px; }
-.switch-row input[type="time"].field.compact { flex: none; width: 112px; }
+.switch-row input[type="time"].field.compact { flex: none; width: 124px; }
+
+/* ---------- Telegram Mini App ---------- */
+body.is-gate .tabbar { display: none; }
+.gate { text-align: center; padding: 80px 24px 40px; display: flex; flex-direction: column; align-items: center; }
+.gate h2 { margin: 0 0 8px; font-size: 24px; letter-spacing: -0.02em; }
+.gate p { margin: 0 auto 22px; max-width: 340px; color: var(--label-2); font-size: 15px; }
+.gate .btn { min-width: 240px; }
+.hint.first { margin-top: 0; }
+.confirm .empty-emoji { width: 64px; height: 64px; font-size: 32px; border-radius: 20px; margin-bottom: 10px; }
+.confirm input.field { text-align: center; }
+/* в Telegram шапку рисует сам Telegram — меньше отступ сверху */
+.is-tg .view { padding-top: 4px; }
+.is-tg .page-head { padding-top: 10px; }

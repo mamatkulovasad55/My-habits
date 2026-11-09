@@ -6,7 +6,8 @@ import {
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
-import * as push from './push.js';
+import * as tg from './tg.js';
+import { WORKER_URL } from './config.js';
 import {
   goalOf, valueOf, progressOf, isDone, isScheduled, firstDay, doneInWeek, scheduleText, goalText,
   currentStreak, bestStreak, streakText, rateOf, totalCompletions, dayStats, rangeRate,
@@ -17,7 +18,7 @@ import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHo
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
-  weekdayLetter, openSheet, refreshLiveSheets, confirmSheet, toast, haptic, segmented,
+  weekdayLetter, openSheet, refreshLiveSheets, confirmSheet, toast, haptic, segmented, topSheet,
 } from './ui.js';
 import {
   uid, dkey, parseKey, today, todayKey, addDays, startOfWeek, esc, plural, fmtDayLong, fmtDateShort, fmtDateTime,
@@ -43,10 +44,13 @@ const pct = (r) => (r === null || r === undefined ? '—' : `${Math.round(r * 10
 function applyTheme() {
   const t = getData().settings.theme || 'system';
   const root = document.documentElement;
-  if (t === 'system') delete root.dataset.theme;
-  else root.dataset.theme = t;
-  const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  // внутри Telegram «как в системе» = тема Telegram
+  const sys = tg.colorScheme() || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  if (t === 'system' && !tg.inTelegram()) delete root.dataset.theme;
+  else root.dataset.theme = t === 'system' ? sys : t;
+  const dark = t === 'dark' || (t === 'system' && sys === 'dark');
   document.querySelector('meta[name=theme-color]:not([media])')?.setAttribute('content', dark ? '#000000' : '#F2F2F7');
+  tg.setColors(dark);
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 
@@ -55,6 +59,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyThe
 // ============================================================
 
 function render() {
+  if (!tg.inTelegram()) return;
   applyTheme();
   const scrollY = window.scrollY;
   const prevRoute = view.dataset.route;
@@ -76,7 +81,7 @@ function render() {
 }
 
 function route() {
-  const r = location.hash.replace('#', '');
+  const r = location.hash.replace('#', '').split(/[?&]/)[0];
   if (r === 'checkin') {
     history.replaceState(null, '', '#today');
     state.route = 'today';
@@ -1206,7 +1211,7 @@ function hoursOverview() {
 function syncStatusHTML() {
   const s = sync.getStatus();
   const map = {
-    off: ['gray', 'Не подключено — данные хранятся только на этом устройстве'],
+    off: ['gray', 'Подключаюсь…'],
     idle: ['green', s.last ? `Синхронизировано · ${new Date(s.last).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : 'Подключено'],
     syncing: ['blue', 'Синхронизация…'],
     offline: ['orange', 'Нет сети — изменения сохранятся и отправятся позже'],
@@ -1217,28 +1222,16 @@ function syncStatusHTML() {
 }
 
 function viewSettings() {
-  const cfg = (state.settingsDraft = state.settingsDraft || sync.getConfig());
   const theme = getData().settings.theme || 'system';
   const archived = habitsAll().filter((h) => h.archived);
-  const connected = sync.isConfigured();
   return `
     <header class="page-head"><div><div class="eyebrow">My Habits</div><h1>Настройки</h1></div></header>
 
-    <div class="group-title">Синхронизация с GitHub</div>
+    <div class="group-title">Данные</div>
     <div class="card pad">
       <div class="sync-status" id="sync-status">${syncStatusHTML()}</div>
-      <div class="form-grid one">
-        <label><span>Владелец (логин GitHub)</span><input class="field" data-s="owner" value="${esc(cfg.owner)}" placeholder="username" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-        <label><span>Приватный репозиторий для данных</span><input class="field" data-s="repo" value="${esc(cfg.repo)}" placeholder="my-habits-data" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-        <label><span>Файл</span><input class="field" data-s="path" value="${esc(cfg.path)}" placeholder="data.json" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
-        <label><span>Токен (fine-grained)</span><input class="field" type="password" data-s="token" value="${esc(cfg.token)}" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-primary" data-s="save">${connected ? 'Сохранить' : 'Подключить'}</button>
-        ${connected ? `<button class="btn btn-secondary" data-s="now">${icon.cloud(17)} Синхронизировать</button>` : ''}
-      </div>
-      ${connected ? `<button class="link-btn danger mt" data-s="off">Отключить синхронизацию</button>` : ''}
-      <p class="hint">Токен хранится только в этом браузере. Создай fine-grained токен с доступом <b>только</b> к репозиторию данных и правом <b>Contents: Read and write</b>. Подробная инструкция — в README репозитория.</p>
+      <button class="btn btn-secondary btn-block mt" data-s="now">${icon.cloud(17)} Синхронизировать сейчас</button>
+      <p class="hint">Данные хранятся в твоём приватном репозитории <b>my-habits-data</b>. Запись идёт через твой сервер, вход подтверждается твоим аккаунтом Telegram — на устройстве нет ни одного ключа.</p>
     </div>
 
     ${notificationsSection()}
@@ -1257,7 +1250,7 @@ function viewSettings() {
         </div>`).join('') : `<div class="row static"><span class="muted">Архив пуст</span></div>`}
     </div>
 
-    <div class="group-title">Данные</div>
+    <div class="group-title">Резервная копия</div>
     <div class="card list-group">
       <button class="row" data-s="export">${icon.archive(20)}<span>Экспорт в JSON</span></button>
       <label class="row">${icon.undo(20)}<span>Импорт из JSON</span><input type="file" accept="application/json,.json" data-s="import" hidden></label>
@@ -1271,26 +1264,16 @@ function viewSettings() {
 
 function notificationsSection() {
   const st = getData().settings;
-  const d = (state.pushDraft = state.pushDraft || { url: st.push.workerUrl || '', key: push.getKey() });
   return `
-    <div class="group-title">Уведомления</div>
+    <div class="group-title">Напоминания</div>
     <div class="card pad">
-      <div class="sync-status" id="push-status"><span class="status-dot" style="background:var(--gray)"></span><span>Проверяю…</span></div>
-      <div class="form-grid one">
-        <label><span>Адрес сервера уведомлений</span><input class="field" data-p="url" value="${esc(d.url)}" placeholder="https://my-habits-push.….workers.dev" autocapitalize="off" autocomplete="off" spellcheck="false" inputmode="url"></label>
-        <label><span>Ключ подключения</span><input class="field" type="password" data-p="key" value="${esc(d.key)}" placeholder="фраза из секрета PUSH_KEY" autocomplete="off"></label>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-primary" data-p="enable">Включить на этом устройстве</button>
-        <button class="btn btn-secondary" data-p="test">Тест</button>
-      </div>
-      <button class="link-btn danger mt" data-p="disable">Отключить на этом устройстве</button>
+      <p class="hint first">Приходят сообщением от бота в Telegram — в начале каждого этапа и по расписанию привычки. Если уже отмечено, напоминания не будет.</p>
       <div class="settings-rows">
         <label class="switch-row"><span>Повторять, если не отмечено</span>
           <select class="field compact" data-set="repeatMin" data-num>${[0, 15, 30, 45, 60, 90].map((m) => `<option value="${m}" ${Number(st.repeatMin) === m ? 'selected' : ''}>${m ? `через ${m} мин` : 'нет'}</option>`).join('')}</select></label>
         <label class="switch-row"><span>Вечерний чек-ин</span><span class="inline"><input type="time" class="field compact" data-set="checkin.time" value="${esc(st.checkin.time)}"><input type="checkbox" class="switch" data-set-bool="checkin.enabled" ${st.checkin.enabled ? 'checked' : ''}></span></label>
       </div>
-      <p class="hint">Для намаза повтор приходит за 25 минут до конца его времени. Как поднять сервер (5 минут, бесплатно) — в README репозитория.</p>
+      <p class="hint">Для намаза повтор приходит за 25 минут до конца его времени. Напоминания для привычек настраиваются в редакторе привычки.</p>
     </div>`;
 }
 
@@ -1339,55 +1322,7 @@ function prayerSection() {
     </div>`;
 }
 
-async function refreshPushStatus() {
-  const el = document.getElementById('push-status');
-  if (!el) return;
-  let st;
-  try {
-    st = await push.status();
-  } catch {
-    st = { state: 'off' };
-  }
-  const map = {
-    on: ['green', 'Включены на этом устройстве'],
-    off: ['gray', 'Выключены на этом устройстве'],
-    denied: ['red', 'Запрещены в настройках телефона — разреши уведомления для приложения'],
-    'need-home': ['orange', 'На iPhone: «Поделиться» → «На экран „Домой“», затем открой приложение с экрана «Домой»'],
-    unsupported: ['red', 'Этот браузер не поддерживает уведомления'],
-  };
-  const [c, text] = map[st.state] || map.off;
-  el.innerHTML = `<span class="status-dot" style="background:var(--${c})"></span><span>${esc(text)}</span>`;
-}
-
 function mountPrefs() {
-  const pd = state.pushDraft;
-  view.querySelectorAll('[data-p=url],[data-p=key]').forEach((inp) => (inp.oninput = () => (pd[inp.dataset.p] = inp.value.trim())));
-  const btn = (k) => view.querySelector(`[data-p=${k}]`);
-  btn('enable').onclick = async () => {
-    btn('enable').disabled = true;
-    try {
-      await push.enable(pd.url, pd.key);
-      if (getData().settings.push.workerUrl !== pd.url) setSetting('push.workerUrl', pd.url);
-      toast('Уведомления включены ✅');
-    } catch (e) {
-      toast(e.message || 'Не удалось включить', { ms: 6000 });
-    }
-    btn('enable').disabled = false;
-    refreshPushStatus();
-  };
-  btn('test').onclick = async () => {
-    try {
-      const r = await push.test(pd.url);
-      toast(`Отправлено на ${r.sent} ${plural(r.sent, ['устройство', 'устройства', 'устройств'])}`);
-    } catch (e) {
-      toast(e.message || 'Ошибка', { ms: 5000 });
-    }
-  };
-  btn('disable').onclick = async () => {
-    await push.disable(pd.url);
-    toast('Уведомления на этом устройстве выключены');
-    refreshPushStatus();
-  };
   view.querySelectorAll('[data-set]').forEach((inp) => (inp.onchange = () => {
     const v = 'num' in inp.dataset ? Number(inp.value) : inp.value;
     if ('num' in inp.dataset && !Number.isFinite(v)) return;
@@ -1424,45 +1359,12 @@ function mountPrefs() {
       { timeout: 10000 },
     );
   };
-  refreshPushStatus();
 }
 
 function mountSettings() {
   mountPrefs();
   const q = (s) => view.querySelector(`[data-s=${s}]`);
-  const d = state.settingsDraft;
-  ['owner', 'repo', 'path', 'token'].forEach((k) => (q(k).oninput = (e) => (d[k] = e.target.value.trim())));
-  q('save').onclick = async () => {
-    const cfg = { owner: d.owner, repo: d.repo || 'my-habits-data', path: d.path || 'data.json', token: d.token };
-    if (!cfg.owner || !cfg.token) return toast('Укажи владельца и токен');
-    const btn = q('save');
-    btn.disabled = true;
-    try {
-      const info = await sync.testConnection(cfg);
-      sync.setConfig(cfg);
-      state.settingsDraft = null;
-      if (!info.private) toast('⚠️ Репозиторий публичный — данные увидят все. Лучше сделать его приватным.', { ms: 6000 });
-      else toast('Подключено к ' + info.fullName);
-      await sync.syncNow();
-      render();
-    } catch (e) {
-      toast(e.message || 'Не удалось подключиться', { ms: 5000 });
-      btn.disabled = false;
-    }
-  };
   if (q('now')) q('now').onclick = () => sync.syncNow();
-  if (q('off')) q('off').onclick = () =>
-    confirmSheet({
-      title: 'Отключить синхронизацию?',
-      message: 'Данные останутся на этом устройстве и в репозитории, но перестанут обновляться.',
-      confirm: 'Отключить',
-      destructive: true,
-      onConfirm: () => {
-        sync.setConfig({ ...sync.getConfig(), token: '' });
-        state.settingsDraft = null;
-        render();
-      },
-    });
   view.querySelectorAll('[data-seg=theme] button').forEach((b) => (b.onclick = () => setSetting('theme', b.dataset.value)));
   view.querySelectorAll('[data-restore]').forEach((b) => (b.onclick = () => upsertHabit({ id: b.dataset.restore, archived: false })));
   q('export').onclick = () => {
@@ -1489,7 +1391,7 @@ function mountSettings() {
   q('wipe').onclick = () =>
     confirmSheet({
       title: 'Удалить все данные?',
-      message: 'Все привычки, история и таймеры воздержания будут удалены' + (sync.isConfigured() ? ' — в том числе в GitHub-репозитории.' : '.') + ' Сначала можно сделать экспорт.',
+      message: 'Все привычки, история и таймеры воздержания будут удалены' + ' — в том числе в репозитории.' + ' Сначала можно сделать экспорт.',
       confirm: 'Удалить всё',
       destructive: true,
       onConfirm: () => {
@@ -1501,13 +1403,116 @@ function mountSettings() {
     });
 }
 
+let firstSyncDone = false;
 sync.onStatus(() => {
+  const st = sync.getStatus();
   const el = document.getElementById('sync-status');
   if (el) el.innerHTML = syncStatusHTML();
-  if (sync.getStatus().state === 'error' && state.route !== 'settings') {
-    toast('Синхронизация: ' + sync.getStatus().error, { ms: 5000 });
+  if (st.state === 'idle' && st.last && !firstSyncDone) {
+    firstSyncDone = true;
+    // часовой пояс для напоминаний — только после загрузки данных, чтобы не перезаписать настройки
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz && getData().settings.tz !== tz) setSetting('tz', tz);
+    } catch {
+      /* ignore */
+    }
   }
+  if (st.state !== 'error') return;
+  if (st.code === 'claim') return openClaim();
+  if (st.code === 'foreign') return renderBlocked('Это личный трекер', 'Он привязан к другому аккаунту Telegram.');
+  if (state.route !== 'settings') toast('Синхронизация: ' + st.error, { ms: 5000 });
 });
+
+// ---------- Первый вход: подтверждение владельца ----------
+
+let claimOpen = false;
+function openClaim() {
+  if (claimOpen) return;
+  claimOpen = true;
+  const s = openSheet({
+    className: 'sheet-compact',
+    render: () => `
+      <div class="sheet-body">
+        <div class="confirm">
+          <div class="empty-emoji">🔐</div>
+          <h3>Подтверди, что это ты</h3>
+          <p>Введи ключ подключения — фразу из секрета <b>PUSH_KEY</b>. Это нужно один раз: дальше вход по твоему аккаунту Telegram.</p>
+          <input class="field" type="password" data-k="key" placeholder="Фраза-ключ" autocomplete="off">
+          <button class="btn btn-block btn-primary mt" data-k="ok">Подтвердить</button>
+        </div>
+      </div>`,
+    mount: (api) => {
+      const inp = api.el.querySelector('[data-k=key]');
+      const btn = api.el.querySelector('[data-k=ok]');
+      setTimeout(() => inp.focus(), 350);
+      const go = async () => {
+        btn.disabled = true;
+        try {
+          await sync.api('/api/claim', { key: inp.value.trim() });
+          claimOpen = false;
+          api.close();
+          haptic(20);
+          toast('Готово! Трекер привязан к твоему Telegram');
+          sync.syncNow();
+        } catch (e) {
+          toast(e.message, { ms: 5000 });
+          btn.disabled = false;
+        }
+      };
+      btn.onclick = go;
+      inp.onkeydown = (e) => e.key === 'Enter' && go();
+    },
+  });
+  return s;
+}
+
+// ---------- Вне Telegram ----------
+
+function renderBlocked(title, text, extra = '') {
+  document.body.classList.add('is-gate');
+  view.innerHTML = `<div class="gate">
+    <div class="empty-emoji">${title.includes('личный') ? '🔒' : '📱'}</div>
+    <h2>${esc(title)}</h2>
+    <p>${text}</p>
+    ${extra}
+  </div>`;
+}
+
+async function renderGate() {
+  // старая версия хранила токен GitHub в браузере — удаляем его с устройства
+  try {
+    localStorage.removeItem('myhabits:sync:v1');
+    localStorage.removeItem('myhabits:pushkey:v1');
+  } catch {
+    /* ignore */
+  }
+  const hasLocal = habitsAll().length || abstainAll().length;
+  renderBlocked(
+    'Трекер теперь в Telegram',
+    'Открой своего бота в Telegram и нажми «Открыть трекер». Данные подтянутся из твоего приватного репозитория.',
+    `<a class="btn btn-primary" id="gate-bot" href="https://t.me/" target="_blank" rel="noopener">Открыть Telegram</a>
+     ${hasLocal ? `<button class="btn btn-secondary mt" id="gate-export">Сохранить копию данных (JSON)</button><p class="hint">На этом устройстве остались данные старой версии. Если синхронизация в ней была включена — они уже в репозитории.</p>` : ''}`,
+  );
+  document.getElementById('gate-export')?.addEventListener('click', () => {
+    const blob = new Blob([stableStringify(getData(), 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `my-habits-${todayKey()}.json`;
+    a.click();
+  });
+  try {
+    const { bot } = await fetch(`${WORKER_URL}/api/info`).then((r) => r.json());
+    if (bot) {
+      const a = document.getElementById('gate-bot');
+      a.href = `https://t.me/${bot}`;
+      a.textContent = 'Открыть в Telegram';
+      a.insertAdjacentHTML('afterend', `<p class="hint">Твой бот: @${esc(bot)}</p>`);
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 // ============================================================
 // События
@@ -1612,19 +1617,17 @@ subscribe(() => {
   });
 });
 onLocalChange(() => sync.schedule());
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => tg.inTelegram() && route());
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && tick());
 
-// часовой пояс устройства — для расчёта напоминаний на сервере
-try {
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (tz && !getData().settings.tz) setSetting('tz', tz);
-} catch {
-  /* ignore */
+if (!tg.inTelegram()) {
+  renderGate();
+} else {
+  tg.init({ onBack: () => topSheet()?.close(), onTheme: applyTheme });
+  route();
+  sync.initSync();
+  if (tg.startScreen() === 'checkin') setTimeout(openCheckin, 300);
 }
-
-route();
-sync.initSync();
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

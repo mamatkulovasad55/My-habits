@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
@@ -14,7 +14,8 @@ const ASSETS = [
   './js/util.js',
   './js/prayer.js',
   './js/schedule.js',
-  './js/push.js',
+  './js/tg.js',
+  './js/config.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/apple-touch-icon.png',
@@ -46,41 +47,5 @@ self.addEventListener('fetch', (e) => {
         return res;
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match('./index.html'))),
-  );
-});
-
-// ---------- Push-уведомления ----------
-
-self.addEventListener('push', (e) => {
-  let d = {};
-  try {
-    d = e.data ? e.data.json() : {};
-  } catch {
-    d = { body: e.data ? e.data.text() : '' };
-  }
-  e.waitUntil(
-    self.registration.showNotification(d.title || 'My Habits', {
-      body: d.body || '',
-      tag: d.tag || undefined,
-      icon: 'icons/icon-192.png',
-      badge: 'icons/icon-192.png',
-      data: { url: d.url || './#today' },
-    }),
-  );
-});
-
-self.addEventListener('notificationclick', (e) => {
-  e.notification.close();
-  const url = new URL(e.notification.data?.url || './#today', self.registration.scope).href;
-  e.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      for (const c of list) {
-        if (c.url.startsWith(self.registration.scope)) {
-          c.focus();
-          return c.navigate ? c.navigate(url) : undefined;
-        }
-      }
-      return self.clients.openWindow(url);
-    }),
   );
 });
