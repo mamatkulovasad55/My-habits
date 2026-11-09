@@ -1,5 +1,6 @@
 // UI-примитивы: иконки, кольца, тепловая карта, графики, шторки, тосты.
 import { addDays, dkey, esc, startOfWeek, today, MONTHS_SHORT, WEEKDAYS_LETTER } from './util.js';
+import * as tg from './tg.js';
 
 export const COLORS = [
   '#FF3B30', '#FF9500', '#FFCC00', '#34C759', '#00C7BE', '#30B0C7',
@@ -175,6 +176,7 @@ export function openSheet({ render, mount, live = false, className = '' }) {
     close() {
       const i = sheets.indexOf(api);
       if (i >= 0) sheets.splice(i, 1);
+      tg.backButton(sheets.length > 0);
       backdrop.classList.remove('is-open');
       el.classList.add('is-closing');
       setTimeout(() => {
@@ -184,6 +186,7 @@ export function openSheet({ render, mount, live = false, className = '' }) {
     },
   };
   sheets.push(api);
+  tg.backButton(true);
   api.refresh();
   requestAnimationFrame(() => backdrop.classList.add('is-open'));
   backdrop.addEventListener('mousedown', (e) => {
@@ -274,6 +277,7 @@ export function toast(text, { action, onAction, ms = 3200 } = {}) {
 }
 
 export const haptic = (ms = 8) => {
+  if (tg.haptic(ms >= 20 ? 'success' : ms >= 12 ? 'medium' : 'light')) return;
   try {
     navigator.vibrate?.(ms);
   } catch {

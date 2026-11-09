@@ -1,4 +1,4 @@
-# Cloudflare Worker — сервер напоминаний My Habits.
+# Cloudflare Worker — сервер My Habits (API для Telegram Mini App, бот, напоминания).
 # Разворачивается workflow .github/workflows/worker.yml (id KV подставляется автоматически).
 name = "my-habits-push"
 main = "index.js"
@@ -16,3 +16,4 @@ id = "__KV_ID__"
 DATA_OWNER = "__DATA_OWNER__"
 DATA_REPO = "my-habits-data"
 DATA_PATH = "data.json"
+APP_URL = "__APP_URL__"

@@ -1,4 +1,4 @@
-name: Deploy push worker (Cloudflare)
+name: Deploy worker and Telegram bot (Cloudflare)
 
 on:
   workflow_dispatch:
@@ -50,16 +50,41 @@ jobs:
           if [ -z "$ID" ]; then echo "Не удалось создать KV namespace"; exit 1; fi
           sed -i "s/__KV_ID__/$ID/" wrangler.toml
           sed -i "s/__DATA_OWNER__/${{ github.repository_owner }}/" wrangler.toml
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          sed -i "s|__APP_URL__|https://${OWNER_LC}.github.io/${REPO_NAME}/|" wrangler.toml
       - name: Deploy
+        id: deploy
         if: steps.check.outputs.skip != 'true'
         working-directory: worker
-        run: wrangler deploy
+        run: |
+          set -o pipefail
+          wrangler deploy | tee deploy.log
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
       - name: Set secrets
         if: steps.check.outputs.skip != 'true'
         working-directory: worker
         env:
           DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
           PUSH_KEY: ${{ secrets.PUSH_KEY }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
+          if [ -n "$BOT_TOKEN" ]; then printf '%s' "$BOT_TOKEN" | wrangler secret put BOT_TOKEN > /dev/null && echo "BOT_TOKEN: ok"; else echo "TELEGRAM_BOT_TOKEN не задан"; fi
           if [ -n "$DATA_TOKEN" ]; then printf '%s' "$DATA_TOKEN" | wrangler secret put DATA_TOKEN > /dev/null && echo "DATA_TOKEN: ok"; else echo "DATA_TOKEN не задан"; fi
           if [ -n "$PUSH_KEY" ]; then printf '%s' "$PUSH_KEY" | wrangler secret put PUSH_KEY > /dev/null && echo "PUSH_KEY: ok"; else echo "PUSH_KEY не задан"; fi
+      - name: Configure Telegram bot
+        if: steps.check.outputs.skip != 'true'
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          WORKER_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          if [ -z "$BOT_TOKEN" ]; then echo "TELEGRAM_BOT_TOKEN не задан — пропускаю настройку бота"; exit 0; fi
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          APP_URL="https://${OWNER_LC}.github.io/${GITHUB_REPOSITORY#*/}/"
+          SECRET=$(printf '%s' "$BOT_TOKEN" | sha256sum | cut -c1-40)
+          api() { curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/$1" -H 'Content-Type: application/json' -d "$2" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(process.argv[1]+": "+(j.ok?"ok":"ошибка "+j.description));if(!j.ok)process.exitCode=1})' "$1"; }
+          api setWebhook "{\"url\":\"${WORKER_URL}/tg\",\"secret_token\":\"${SECRET}\",\"allowed_updates\":[\"message\"],\"drop_pending_updates\":true}"
+          api setChatMenuButton "{\"menu_button\":{\"type\":\"web_app\",\"text\":\"Трекер\",\"web_app\":{\"url\":\"${APP_URL}\"}}}"
+          api setMyCommands '{"commands":[]}'
+          api setMyDescription '{"description":"Личный трекер привычек и воздержания. Нажми «Трекер» внизу, чтобы открыть приложение."}'
