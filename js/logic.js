@@ -1,13 +1,22 @@
 // Бизнес-логика: расписания, серии, проценты, воздержание, достижения.
-import { getData, getLog, habitsActive, habitsAll, abstainAll, subscribe } from './store.js';
+import { getData, getLog, getStageLog, habitsActive, habitsAll, abstainAll, subscribe } from './store.js';
 import { addDays, dkey, parseKey, startOfDay, startOfWeek, today, plural, DAY_FORMS, TIMES_FORMS, WEEKDAYS_SHORT } from './util.js';
 
 const DAY = 86400000;
 
 // ================= Полезные привычки =================
 
-/** Цель в «единицах лога»: галочка — 1, количество — target, таймер — секунды. */
+export const hasStages = (h) => Array.isArray(h.stages) && h.stages.length > 0;
+
+/** Выполнен ли этап за день (для галочки — 1, для количества — минимум этапа). */
+export function stageDone(h, day, s) {
+  const need = h.type === 'count' ? Math.max(1, Number(s.min) || 1) : 1;
+  return getStageLog(h.id, typeof day === 'string' ? day : dkey(day), s.id) >= need;
+}
+
+/** Цель в «единицах лога»: галочка — 1 (или число этапов), количество — target, таймер — секунды. */
 export function goalOf(h) {
+  if (h.type === 'check' && hasStages(h)) return h.stages.length;
   if (h.type === 'count') return Math.max(1, Number(h.target) || 1);
   if (h.type === 'timer') return Math.max(1, Number(h.target) || 1) * 60;
   return 1;

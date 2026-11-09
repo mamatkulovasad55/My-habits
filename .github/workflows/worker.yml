@@ -1,0 +1,65 @@
+name: Deploy push worker (Cloudflare)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['worker/**', 'js/schedule.js', 'js/prayer.js', 'js/logic.js', 'js/store.js', 'js/util.js']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check secrets
+        id: check
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Секреты Cloudflare не заданы — пропускаю деплой (см. README, раздел «Уведомления»)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.skip != 'true'
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.skip != 'true'
+        with:
+          node-version: 20
+      - name: Install wrangler
+        if: steps.check.outputs.skip != 'true'
+        run: npm install -g wrangler@3.114.0
+      - name: Prepare KV namespace
+        if: steps.check.outputs.skip != 'true'
+        working-directory: worker
+        run: |
+          TITLE="my-habits-push-KV"
+          find_id() { wrangler kv namespace list 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const a=JSON.parse(s.slice(s.indexOf("[")));const n=a.find(x=>x.title===process.argv[1]);process.stdout.write(n?n.id:"")}catch{}})' "$TITLE"; }
+          ID=$(find_id)
+          if [ -z "$ID" ]; then
+            wrangler kv namespace create KV > /dev/null
+            ID=$(find_id)
+          fi
+          if [ -z "$ID" ]; then echo "Не удалось создать KV namespace"; exit 1; fi
+          sed -i "s/__KV_ID__/$ID/" wrangler.toml
+          sed -i "s/__DATA_OWNER__/${{ github.repository_owner }}/" wrangler.toml
+      - name: Deploy
+        if: steps.check.outputs.skip != 'true'
+        working-directory: worker
+        run: wrangler deploy
+      - name: Set secrets
+        if: steps.check.outputs.skip != 'true'
+        working-directory: worker
+        env:
+          DATA_TOKEN: ${{ secrets.DATA_TOKEN }}
+          PUSH_KEY: ${{ secrets.PUSH_KEY }}
+        run: |
+          if [ -n "$DATA_TOKEN" ]; then printf '%s' "$DATA_TOKEN" | wrangler secret put DATA_TOKEN > /dev/null && echo "DATA_TOKEN: ok"; else echo "DATA_TOKEN не задан"; fi
+          if [ -n "$PUSH_KEY" ]; then printf '%s' "$PUSH_KEY" | wrangler secret put PUSH_KEY > /dev/null && echo "PUSH_KEY: ok"; else echo "PUSH_KEY не задан"; fi
