@@ -2,7 +2,7 @@
 import {
   getData, getLocal, subscribe, update, updateLocal, replaceData, merge, emptyData, touch,
   habitsActive, habitsAll, abstainAll, findHabit, findAbstain, getLog, setLog,
-  getStageLog, setStageLog, getEvents, setNote, reorderHabits, mergeIntoStaged,
+  getStageLog, setStageLog, getEvents, setNote, addEvent, QADA_LOG, reorderHabits, mergeIntoStaged,
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
@@ -14,7 +14,7 @@ import {
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
-import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM } from './schedule.js';
+import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -216,16 +216,22 @@ function namazBanner() {
   </section>`;
 }
 
+const VITR_STAGE = () => ({ id: 'p-vitr', name: 'Витр', role: 'vitr', min: 1, max: 1, remind: false, time: { mode: 'prayer', prayer: 'isha', minutes: 0 } });
+const NAMAZ_STAGES = () => [
+  ...PRAYERS.map((p) => ({ id: `p-${p.key}`, name: p.name, min: 1, max: 1, remind: true, time: { mode: 'prayer', prayer: p.key, minutes: 0 } })),
+  VITR_STAGE(),
+];
+
 function mergeNamaz() {
   const found = findNamazHabits();
   const first = found[0]?.h;
-  const stages = PRAYERS.map((p) => ({ id: `p-${p.key}`, name: p.name, min: 1, max: 1, remind: true, time: { mode: 'prayer', prayer: p.key, minutes: 0 } }));
+  const stages = NAMAZ_STAGES();
   mergeIntoStaged(
     { name: 'Намаз', emoji: first?.emoji || '🕌', color: first?.color || COLORS[3], type: 'check', target: 1, unit: '', step: 1, schedule: { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3 }, stages },
     found.map((x) => ({ habitId: x.h.id, stageId: `p-${x.prayer}` })),
   );
   haptic(20);
-  toast('Готово: «Намаз» с 5 этапами');
+  toast('Готово: «Намаз» — 5 намазов и Витр');
 }
 
 // ---------- Порядок привычек (перетаскивание) ----------
@@ -299,7 +305,7 @@ function openCheckin() {
         <div class="sheet-body">
           <div class="group-title">${left.length ? 'Ещё не выполнено' : 'Привычки'}</div>
           <div class="card list-group">${left.length
-            ? left.map((h) => `<button class="row" data-open="${h.id}"><span class="emoji-chip" style="--c:${h.color}">${esc(h.emoji)}</span><div class="row-main"><b>${esc(h.name)}</b><span class="muted">${h.type === 'check' && !hasStages(h) ? 'не отмечено' : `${fmtNum(valueOf(h, key))} из ${goalOf(h)}${hasStages(h) && h.type === 'check' ? ' этапов' : ''}`}</span></div>${icon.chevronR(18)}</button>`).join('')
+            ? left.map((h) => `<button class="row" data-open="${h.id}"><span class="emoji-chip" style="--c:${h.color}">${esc(h.emoji)}</span><div class="row-main"><b>${esc(h.name)}</b><span class="muted">${h.type === 'check' && !hasStages(h) ? 'не отмечено' : `${fmtNum(valueOf(h, key))} из ${goalOf(h, key)}${hasStages(h) && h.type === 'check' ? ' этапов' : ''}`}</span></div>${icon.chevronR(18)}</button>`).join('')
             : `<div class="row static"><span>Всё выполнено — отличный день! 🎉</span></div>`}</div>
           ${abst.length ? `<div class="group-title">Воздержание сегодня</div>
           <div class="card list-group">${abst.map((a) => {
@@ -331,11 +337,64 @@ function tapStage(h, day) {
   return currentStage(h, day, isToday ? nowMin() : 1440 * 2, dayContext(day));
 }
 
+const STATUS_CLASS = { ontime: 'is-done', late: 'is-done', qada: 'is-qada', missed: 'is-missed' };
+
 function stageDots(h, day) {
-  const key = dkey(day);
   return `<span class="stage-dots">${stagesForDay(h, day)
-    .map((s) => `<i class="${stageDone(h, key, s) ? 'is-done' : ''}" title="${esc(s.name)}"></i>`)
+    .map((s) => `<i class="${STATUS_CLASS[stageStatus(h, day, s)] || ''}" title="${esc(s.name)}"></i>`)
     .join('')}</span>`;
+}
+
+// ---------- Отметка намаза: каза / вовремя, Джума / Зухр ----------
+
+function choiceSheet({ title, message = '', options }) {
+  openSheet({
+    className: 'sheet-compact',
+    render: () => `<div class="sheet-body"><div class="confirm">
+      <h3>${esc(title)}</h3>${message ? `<p>${message}</p>` : ''}
+      ${options.map((o, i) => `<button class="btn btn-block ${o.primary ? 'btn-primary' : 'btn-secondary'} choice" data-i="${i}" ${o.color ? `style="--c:${o.color}"` : ''}>${o.label}</button>`).join('')}
+      <button class="btn btn-block btn-plain" data-i="-1">Отмена</button>
+    </div></div>`,
+    mount: (api) => api.el.querySelectorAll('[data-i]').forEach((b) => (b.onclick = () => {
+      api.close();
+      const o = options[+b.dataset.i];
+      if (o) o.run();
+    })),
+  });
+}
+
+/** Отметить этап; для намаза — с вопросами про каза и Джума. */
+function markStage(h, date, s, { undo = true } = {}) {
+  const key = dkey(date);
+  const cur = getStageLog(h.id, key, s.id);
+  const done = (k, label) => {
+    haptic(k === 'qada' ? 20 : 10);
+    setStageLog(h.id, key, s.id, 1, k);
+    if (undo) toast(label, { action: 'Отменить', onAction: () => setStageLog(h.id, key, s.id, cur) });
+  };
+  const isPrayer = Boolean(prayerKeyOf(s));
+  const expired = isPrayer && stageExpired(date, s);
+  if (expired) {
+    const name = s.juma ? 'Джума' : s.name;
+    return choiceSheet({
+      title: `${name} — время вышло`,
+      message: `Время ${s.juma ? 'Зухра' : 'намаза'} закончилось в ${fmtMin(s.end)}${dkey(date) !== todayKey() ? ` (${fmtDateShort(date)})` : ''}. Как отметить?`,
+      options: [
+        { label: '🕰️ Каза — восполняю', primary: true, run: () => done('qada', `${s.juma ? 'Зухр' : name}: каза засчитан`) },
+        { label: 'Читал вовремя, просто не отметил', run: () => done('late', `${name} отмечен`) },
+      ],
+    });
+  }
+  if (s.juma) {
+    return choiceSheet({
+      title: 'Пятничная молитва',
+      options: [
+        { label: '🕌 Джума', primary: true, run: () => done('juma', 'Джума отмечена') },
+        { label: 'Зухр — не успел на Джума', run: () => done('dhuhr', 'Зухр отмечен') },
+      ],
+    });
+  }
+  done('', `${s.name} отмечен`);
 }
 
 function habitCard(h, day) {
@@ -344,7 +403,7 @@ function habitCard(h, day) {
   const isToday = key === todayKey();
   const running = isToday && getLocal().timers?.[h.id];
   const v = h.type === 'timer' ? runningValue(h, key) : valueOf(h, key);
-  const g = goalOf(h);
+  const g = goalOf(h, key);
   const done = v >= g;
   const sub = [];
   if (h.type === 'count') sub.push(`${fmtNum(v)} / ${h.target} ${esc(h.unit || '')}`.trim());
@@ -376,7 +435,7 @@ function habitCard(h, day) {
 function stagedCard(h, day) {
   const key = dkey(day);
   const v = valueOf(h, key);
-  const g = goalOf(h);
+  const g = goalOf(h, key);
   const done = v >= g;
   const ctx = dayContext(day);
   const st = tapStage(h, day);
@@ -391,6 +450,10 @@ function stagedCard(h, day) {
   }
   const cs = currentStreak(h);
   if (cs.value > 0) sub.push(`<span class="streak">${icon.flame(13)} ${streakText(cs)}</span>`);
+  if (isNamazHabit(h) && dkey(day) === todayKey()) {
+    const debt = qadaDebt().total;
+    if (debt) sub.push(`<span class="debt">каза ${debt}</span>`);
+  }
   void ctx;
 
   const action = st
@@ -414,16 +477,13 @@ function habitTap(id) {
   const key = dkey(state.day);
   const isToday = key === todayKey();
   const v = valueOf(h, key);
-  const g = goalOf(h);
+  const g = goalOf(h, key);
   haptic();
   if (hasStages(h)) {
     const st = tapStage(h, state.day);
     if (!st) return openHabitDetail(id);
     const cur = getStageLog(id, key, st.id);
-    if (h.type === 'check') {
-      setStageLog(id, key, st.id, 1);
-      return toast(`${st.name} отмечен`, { action: 'Отменить', onAction: () => setStageLog(id, key, st.id, cur) });
-    }
+    if (h.type === 'check') return markStage(h, state.day, st);
     return setStageLog(id, key, st.id, cur + (Number(h.step) || 1));
   }
   if (h.type === 'check') {
@@ -473,7 +533,7 @@ function openHabitDetail(id) {
       const key = dkey(day);
       const isToday = key === todayKey();
       const v = h.type === 'timer' ? runningValue(h, key) : valueOf(h, key);
-      const g = goalOf(h);
+      const g = goalOf(h, key);
       const running = isToday && getLocal().timers?.[h.id];
       const dayLabel = isToday ? 'Сегодня' : fmtDateShort(day);
 
@@ -525,6 +585,7 @@ function openHabitDetail(id) {
           </div>
           <div class="group-title">Последний год</div>
           <div class="card pad">${heatmap(habitHeatValue(h), h.color)}</div>
+          ${isNamazHabit(h) ? qadaCard() + namazStatsCard(h) : ''}
           ${timeStatsCard(h)}
           <div class="card list-group">
             <button class="row" data-d="archive">${icon.archive(20)}<span>${h.archived ? 'Вернуть из архива' : 'В архив'}</span></button>
@@ -539,7 +600,7 @@ function openHabitDetail(id) {
       const q = (s) => api.el.querySelector(`[data-d=${s}]`);
       q('close').onclick = () => api.close();
       q('edit').onclick = () => openHabitEditor(h);
-      const g = goalOf(h);
+      const g = goalOf(h, key);
       const v = valueOf(h, key);
       if (q('toggle')) q('toggle').onclick = () => (haptic(), setLog(id, key, v >= 1 ? 0 : 1));
       if (q('inc')) q('inc').onclick = () => (haptic(), setLog(id, key, v + (Number(h.step) || 1)));
@@ -556,8 +617,13 @@ function openHabitDetail(id) {
         const step = Number(h.step) || 1;
         if (b.dataset.op === 'inc') setStageLog(id, key, sid, cur + step);
         else if (b.dataset.op === 'dec') setStageLog(id, key, sid, Math.max(0, cur - step));
-        else setStageLog(id, key, sid, cur >= 1 ? 0 : 1);
+        else if (cur >= 1) setStageLog(id, key, sid, 0);
+        else {
+          const s = stagesForDay(h, state.day).find((x) => x.id === sid);
+          if (s) markStage(h, state.day, s, { undo: false });
+        }
       }));
+      api.el.querySelectorAll('[data-repay]').forEach((b) => (b.onclick = () => repayQada(b.dataset.repay)));
       q('archive').onclick = () => {
         upsertHabit({ id, archived: !h.archived });
         if (!h.archived) {
@@ -588,14 +654,76 @@ function stageEditor(h, day) {
   return `<div class="stage-list">${list.map((s) => {
     const val = getStageLog(h.id, key, s.id);
     const ok = stageDone(h, key, s);
-    const ev = getEvents(h.id, key).filter((e) => e.s === s.id && e.d > 0).pop();
-    const when = ok && ev ? `отмечено в ${fmtMin(new Date(ev.ts).getHours() * 60 + new Date(ev.ts).getMinutes())}` : s.start != null ? `${fmtMin(s.start)}${s.end != null && s.time?.mode === 'prayer' ? `–${fmtMin(s.end)}` : ''}` : '';
+    const ev = stageMark(h, key, s);
+    const status = stageStatus(h, day, s);
+    const at = ev ? fmtMin(new Date(ev.ts).getHours() * 60 + new Date(ev.ts).getMinutes()) : '';
+    const window_ = s.start != null ? `${fmtMin(s.start)}${s.end != null && s.time?.mode === 'prayer' ? `–${fmtMin(s.end)}` : ''}` : '';
+    const kindLabel = ev?.k === 'juma' ? 'Джума · ' : ev?.k === 'dhuhr' ? 'Зухр вместо Джума · ' : '';
+    const when = {
+      ontime: `${kindLabel}отмечено в ${at}`,
+      late: `${kindLabel}вовремя, отмечено в ${at}`,
+      qada: `каза · восполнено в ${at}`,
+      missed: `пропущен (${window_}) · долг каза`,
+    }[status] || (ok && at ? `отмечено в ${at}` : window_);
     const range = s.max && s.max !== s.min ? `${s.min}–${s.max}` : `${s.min}`;
     const control = h.type === 'count'
       ? `<div class="mini-stepper"><button class="round-btn sm" data-st="${s.id}" data-op="dec" aria-label="Меньше">${icon.minus(14)}</button><span class="${ok ? 'is-ok' : ''}">${fmtNum(val)}<small>/${range}</small></span><button class="round-btn sm" style="--c:${h.color}" data-st="${s.id}" data-op="inc" aria-label="Больше">${icon.plus(14)}</button></div>`
-      : `<button class="act act-check ${ok ? 'is-done' : ''}" style="--c:${h.color}" data-st="${s.id}" aria-label="Отметить">${icon.check(16)}</button>`;
-    return `<div class="stage-row ${ok ? 'is-ok' : ''}"><div class="row-main"><b>${esc(s.name)}</b><span class="muted">${esc(when)}</span></div>${control}</div>`;
+      : `<button class="act act-check ${ok ? 'is-done' : ''}" style="--c:${status === 'qada' ? 'var(--orange)' : h.color}" data-st="${s.id}" aria-label="Отметить">${icon.check(16)}</button>`;
+    return `<div class="stage-row ${ok ? 'is-ok' : ''} st-${status}"><div class="row-main"><b>${esc(s.name)}</b><span class="muted">${esc(when)}</span></div>${control}</div>`;
   }).join('')}</div>`;
+}
+
+// ---------- Каза ----------
+
+function repayQada(p) {
+  const debt = qadaDebt();
+  const b = debt.byPrayer[p];
+  if (!b || !b.total) return;
+  haptic(20);
+  if (b.missed.length) {
+    // сначала закрываем самый старый пропуск по трекеру
+    const m = b.missed[0];
+    setStageLog(m.hid, m.day, m.sid, 1, 'qada');
+    return toast(`${QADA_NAMES[p]} за ${fmtDateShort(parseKey(m.day))}: каза засчитан`, { action: 'Отменить', onAction: () => setStageLog(m.hid, m.day, m.sid, 0) });
+  }
+  addEvent(QADA_LOG, todayKey(), 1, p, Date.now(), 'qada');
+  toast(`${QADA_NAMES[p]}: −1 из старого долга`, { action: 'Отменить', onAction: () => addEvent(QADA_LOG, todayKey(), -1, p) });
+}
+
+function qadaCard() {
+  const d = qadaDebt();
+  const goal = d.perDay;
+  const rows = QADA_KEYS.filter((k) => d.byPrayer[k].total).map((k) => {
+    const b = d.byPrayer[k];
+    const parts = [];
+    if (b.missed.length) parts.push(`по трекеру ${b.missed.length}`);
+    if (b.oldLeft) parts.push(`старый долг ${b.oldLeft}`);
+    return `<div class="row static"><div class="row-main"><b>${QADA_NAMES[k]} · ${b.total}</b><span class="muted">${parts.join(' · ')}</span></div><button class="pill qada-pill" data-repay="${k}">+ Восполнил</button></div>`;
+  }).join('');
+  let forecast = '';
+  if (d.oldLeft && goal) {
+    const days = Math.ceil(d.oldLeft / goal);
+    forecast = `При ${goal} в день старый долг будет восполнен примерно к ${fmtDateShort(addDays(today(), days))} (${days} ${plural(days, DAY_FORMS)}).`;
+  }
+  return `<div class="group-title">Каза${d.total ? ` · долг ${d.total}` : ''}</div>
+    ${d.total ? `<div class="card list-group">${rows}</div>` : `<div class="card pad"><p class="hint first center">Долгов каза нет — ма шаа Аллах 🤲</p></div>`}
+    ${goal && d.oldLeft ? `<div class="card pad qada-goal"><div class="milestone-row"><span>Сегодня восполнено</span><span><b>${d.repaidToday}</b> из ${goal}</span></div><div class="progress" style="--c:var(--orange)"><div style="width:${Math.min(100, Math.round((d.repaidToday / goal) * 100))}%"></div></div>${forecast ? `<p class="hint">${forecast}</p>` : ''}</div>` : ''}
+    <p class="hint">Пропущенные по трекеру намазы появляются здесь автоматически. Старые долги и цель в день — в Настройках → Время намаза.</p>`;
+}
+
+function namazStatsCard(h) {
+  const s = namazStats(h, 30);
+  const all = s.ontime + s.late + s.qada + s.missed;
+  if (!all) return '';
+  const pctOf = (n) => `${Math.round((n / all) * 100)}%`;
+  return `<div class="group-title">Намазы · 30 дней</div>
+    <div class="tiles">
+      <div class="tile"><div class="tile-label">Вовремя</div><div class="tile-val" style="color:var(--green)">${pctOf(s.ontime + s.late)}</div></div>
+      <div class="tile"><div class="tile-label">Каза</div><div class="tile-val" style="color:var(--orange)">${s.qada}</div></div>
+      <div class="tile"><div class="tile-label">Пропущено</div><div class="tile-val" style="color:${s.missed ? 'var(--red)' : 'inherit'}">${s.missed}</div></div>
+      <div class="tile"><div class="tile-label">Джума</div><div class="tile-val">${s.juma}<small> из ${s.fridays}</small></div></div>
+    </div>
+    ${s.late ? `<p class="hint">Отмечено с опозданием (но прочитано вовремя): ${s.late}.</p>` : ''}`;
 }
 
 function hoursChart(hours, color) {
@@ -728,6 +856,8 @@ function openHabitEditor(existing) {
           schedule: { kind: f.schedule.kind, days: [...f.schedule.days].sort(), times: f.schedule.times },
           stages: f.type !== 'timer' && f.useStages ? f.stages.filter((x) => x.name.trim()).map((x) => ({
             id: x.id || uid(),
+            role: x.role,
+            since: x.since,
             name: x.name.trim(),
             min: f.type === 'count' ? Math.max(1, Number(x.min) || 1) : 1,
             max: f.type === 'count' ? Math.max(Number(x.min) || 1, Number(x.max) || Number(x.min) || 1) : 1,
@@ -798,7 +928,7 @@ function stagesSection(f) {
         ${stages}
         <div class="btn-row">
           <button class="btn btn-secondary" data-e="addStage">${icon.plus(16)} Этап</button>
-          ${f.type === 'check' ? `<button class="btn btn-secondary" data-e="tplNamaz">🕌 5 намазов</button>` : `<button class="btn btn-secondary" data-e="tplWater">💧 Вода по режиму</button>`}
+          ${f.type === 'check' ? `<button class="btn btn-secondary" data-e="tplNamaz">🕌 Намазы + Витр</button>` : `<button class="btn btn-secondary" data-e="tplWater">💧 Вода по режиму</button>`}
         </div>
         <p class="hint">${f.type === 'count' ? 'Этап засчитан, когда выполнен минимум; всё сверх — в общий счёт дня.' : 'Привычка выполнена, когда отмечены все этапы.'} Время «после подъёма» и «до сна» берётся из Настроек → Режим дня.</p>` : ''}
     </div>
@@ -846,7 +976,7 @@ function mountStagesSection(el, f, api) {
   if (q('addStage')) q('addStage').onclick = () => (f.stages.push({ id: uid(), name: '', min: 1, max: 1, remind: true, time: { mode: 'fixed', at: '12:00' } }), api.refresh());
   if (q('addReminder')) q('addReminder').onclick = () => (f.reminders.push({ mode: 'fixed', at: '09:00' }), api.refresh());
   if (q('tplNamaz')) q('tplNamaz').onclick = () => {
-    f.stages = PRAYERS.map((p) => ({ id: `p-${p.key}`, name: p.name, min: 1, max: 1, remind: true, time: { mode: 'prayer', prayer: p.key, minutes: 0 } }));
+    f.stages = NAMAZ_STAGES();
     if (!f.name.trim()) f.name = 'Намаз';
     api.refresh();
   };
@@ -1319,6 +1449,42 @@ function prayerSection() {
         </div>
         <div class="mt">${segmented('asr', [{ value: 'hanafi', label: 'Аср: ханафитский' }, { value: 'shafi', label: 'Аср: шафиитский' }], p.asr)}</div>
       </details>
+    </div>
+    ${jumaSection()}
+    ${qadaSettingsSection()}`;
+}
+
+function jumaSection() {
+  const j = getData().settings.juma;
+  return `
+    <div class="group-title">Джума</div>
+    <div class="card pad">
+      <label class="switch-row"><span>По пятницам вместо Зухра</span><input type="checkbox" class="switch" data-set-bool="juma.enabled" ${j.enabled ? 'checked' : ''}></label>
+      ${j.enabled ? `<div class="settings-rows">
+        <label class="switch-row"><span>Начало Джума</span><input type="time" class="field compact" data-set="juma.time" value="${esc(j.time)}"></label>
+        <label class="switch-row"><span>Напомнить заранее</span>
+          <select class="field compact" data-set="juma.lead" data-num>${[0, 15, 30, 45, 60, 90].map((m) => `<option value="${m}" ${Number(j.lead) === m ? 'selected' : ''}>${m ? `за ${m} мин` : 'в начале'}</option>`).join('')}</select></label>
+      </div>` : ''}
+      <p class="hint">При отметке в пятницу выбираешь: Джума или Зухр (если не успел).</p>
+    </div>`;
+}
+
+function qadaSettingsSection() {
+  const q = getData().settings.qada;
+  const d = qadaDebt();
+  return `
+    <div class="group-title">Старые долги каза</div>
+    <div class="card pad">
+      <div class="calc">
+        <span>Пропущено</span>
+        <label class="unit-field"><input class="field" type="number" min="0" inputmode="numeric" id="qada-years" placeholder="0"><span>лет</span></label>
+        <label class="unit-field"><input class="field" type="number" min="0" inputmode="numeric" id="qada-months" placeholder="0"><span>мес.</span></label>
+        <button class="btn btn-secondary" id="qada-calc">Посчитать</button>
+      </div>
+      <div class="qada-grid">${QADA_KEYS.map((k) => `<label><span>${QADA_NAMES[k]}</span><input class="field" type="number" min="0" inputmode="numeric" data-set="qada.old.${k}" data-num value="${Number(q.old?.[k]) || 0}"></label>`).join('')}</div>
+      <label class="switch-row mt"><span>Цель: восполнять в день</span>
+        <select class="field compact" data-set="qada.perDay" data-num>${[0, 1, 2, 3, 4, 5, 6, 10].map((n) => `<option value="${n}" ${Number(q.perDay) === n ? 'selected' : ''}>${n ? `${n} ${plural(n, ['намаз', 'намаза', 'намазов'])}` : 'без цели'}</option>`).join('')}</select></label>
+      <p class="hint">Калькулятор считает по одному намазу каждого вида за каждый день (включая Витр), дальше любое число можно поправить. Осталось восполнить из старого долга: <b>${d.oldLeft}</b>.</p>
     </div>`;
 }
 
@@ -1334,6 +1500,25 @@ function mountPrefs() {
     setSetting(`prayer.adj.${k}`, (getData().settings.prayer.adj?.[k] || 0) + Number(b.dataset.delta));
   }));
   view.querySelectorAll('[data-seg=asr] button').forEach((b) => (b.onclick = () => setSetting('prayer.asr', b.dataset.value)));
+  const calc = view.querySelector('#qada-calc');
+  if (calc) calc.onclick = () => {
+    const years = Number(view.querySelector('#qada-years').value) || 0;
+    const months = Number(view.querySelector('#qada-months').value) || 0;
+    const days = Math.round(years * 354.37 + months * 29.53); // лунный год, как принято при подсчёте каза
+    if (!days) return toast('Укажи годы или месяцы');
+    confirmSheet({
+      title: `${days} ${plural(days, DAY_FORMS)} — по ${days} каждого намаза`,
+      message: 'Заменить текущие числа старого долга? Уже восполненное по старому долгу будет вычитаться из новых чисел.',
+      confirm: 'Заменить',
+      onConfirm: () => {
+        update((d) => {
+          d.settings.qada = { ...d.settings.qada, old: Object.fromEntries(QADA_KEYS.map((k) => [k, days])) };
+          d.settings.updatedAt = Date.now();
+        });
+        toast('Старый долг записан');
+      },
+    });
+  };
   const city = view.querySelector('[data-pr=city]');
   city.onchange = () => {
     const c = CITIES.find(([n]) => n === city.value);
@@ -1410,6 +1595,7 @@ sync.onStatus(() => {
   if (el) el.innerHTML = syncStatusHTML();
   if (st.state === 'idle' && st.last && !firstSyncDone) {
     firstSyncDone = true;
+    migrateNamaz();
     // часовой пояс для напоминаний — только после загрузки данных, чтобы не перезаписать настройки
     try {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1423,6 +1609,17 @@ sync.onStatus(() => {
   if (st.code === 'foreign') return renderBlocked('Это личный трекер', 'Он привязан к другому аккаунту Telegram.');
   if (state.route !== 'settings') toast('Синхронизация: ' + st.error, { ms: 5000 });
 });
+
+/** Разово: начало учёта каза и этап Витр у привычки «Намаз». Только после загрузки данных с сервера. */
+function migrateNamaz() {
+  const tk = todayKey();
+  if (!getData().settings.qada?.since) setSetting('qada.since', tk);
+  for (const h of habitsActive().filter(isNamazHabit)) {
+    if (h.stages.some((x) => x.role === 'vitr')) continue;
+    upsertHabit({ id: h.id, stages: [...h.stages, { ...VITR_STAGE(), since: tk }] });
+    toast('В «Намаз» добавлен Витр');
+  }
+}
 
 // ---------- Первый вход: подтверждение владельца ----------
 

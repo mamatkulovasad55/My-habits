@@ -14,17 +14,27 @@ export function stageDone(h, day, s) {
   return getStageLog(h.id, typeof day === 'string' ? day : dkey(day), s.id) >= need;
 }
 
+const keyOf = (day) => (typeof day === 'string' ? day : dkey(day));
+
+/** Активен ли этап в этот день (этап, добавленный позже, не портит прошлую статистику). */
+export const stageActive = (s, day) => !s.since || keyOf(day) >= s.since;
+export const activeStages = (h, day) => (h.stages || []).filter((s) => (day ? stageActive(s, day) : true));
+
 /** Цель в «единицах лога»: галочка — 1 (или число этапов), количество — target, таймер — секунды. */
-export function goalOf(h) {
-  if (h.type === 'check' && hasStages(h)) return h.stages.length;
+export function goalOf(h, day) {
+  if (h.type === 'check' && hasStages(h)) return Math.max(1, activeStages(h, day).length);
   if (h.type === 'count') return Math.max(1, Number(h.target) || 1);
   if (h.type === 'timer') return Math.max(1, Number(h.target) || 1) * 60;
   return 1;
 }
 
-export const valueOf = (h, day) => getLog(h.id, typeof day === 'string' ? day : dkey(day));
-export const progressOf = (h, day) => Math.min(1, valueOf(h, day) / goalOf(h));
-export const isDone = (h, day) => valueOf(h, day) >= goalOf(h);
+export function valueOf(h, day) {
+  // для привычки-галочки с этапами значение = число отмеченных активных этапов
+  if (h.type === 'check' && hasStages(h)) return activeStages(h, day).filter((s) => stageDone(h, day, s)).length;
+  return getLog(h.id, keyOf(day));
+}
+export const progressOf = (h, day) => Math.min(1, valueOf(h, day) / goalOf(h, day));
+export const isDone = (h, day) => valueOf(h, day) >= goalOf(h, day);
 
 // кэш первых дней — сбрасывается при любом изменении данных
 const firstCache = new Map();
@@ -177,8 +187,7 @@ export function rateOf(h, days = 30) {
 
 export function totalCompletions(h) {
   const logs = getData().logs[h.id] || {};
-  const g = goalOf(h);
-  return Object.values(logs).filter((e) => (e.v || 0) >= g).length;
+  return Object.keys(logs).filter((day) => isDone(h, day)).length;
 }
 
 /** Итог дня по всем активным привычкам: {done, total, ratio} */

@@ -26,6 +26,8 @@ export function defaultSettings() {
       adj: { fajr: 0, sunrise: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0 },
     },
     push: { workerUrl: '' },
+    juma: { enabled: true, time: '13:00', lead: 45 },
+    qada: { since: '', perDay: 2, old: { fajr: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0, vitr: 0 } },
   };
 }
 
@@ -51,6 +53,8 @@ function normalizeSettings(s) {
     checkin: { ...d.checkin, ...(s.checkin || {}) },
     prayer: { ...d.prayer, ...(s.prayer || {}), adj: { ...d.prayer.adj, ...(s.prayer?.adj || {}) } },
     push: { ...d.push, ...(s.push || {}) },
+    juma: { ...d.juma, ...(s.juma || {}) },
+    qada: { ...d.qada, ...(s.qada || {}), old: { ...d.qada.old, ...(s.qada?.old || {}) } },
   };
 }
 
@@ -213,8 +217,11 @@ export function getStageLog(hid, day, sid) {
 /** События привычки за день (с временем нажатий). */
 export const getEvents = (hid, day) => entryEvents(data.logs[hid]?.[day]);
 
-/** Добавить событие (изменение значения на delta, опционально — для этапа). */
-export function addEvent(hid, day, delta, sid, ts = Date.now()) {
+/**
+ * Добавить событие (изменение значения на delta, опционально — для этапа).
+ * k — вид отметки: 'qada' (восполнение), 'late' (вовремя, отмечено поздно), 'juma', 'dhuhr'.
+ */
+export function addEvent(hid, day, delta, sid, ts = Date.now(), k = '') {
   if (!delta) return;
   update((d) => {
     d.logs[hid] = d.logs[hid] || {};
@@ -222,6 +229,7 @@ export function addEvent(hid, day, delta, sid, ts = Date.now()) {
     const ev = [...entryEvents(e)];
     const item = { id: uid(), ts, d: delta };
     if (sid) item.s = sid;
+    if (k && delta > 0) item.k = k;
     ev.push(item);
     const next = { ev, t: Date.now() };
     next.v = entryValue(next);
@@ -235,9 +243,12 @@ export function setLog(hid, day, v) {
 }
 
 /** Установить значение этапа. */
-export function setStageLog(hid, day, sid, v) {
-  addEvent(hid, day, Math.max(0, v) - getStageLog(hid, day, sid), sid);
+export function setStageLog(hid, day, sid, v, k = '') {
+  addEvent(hid, day, Math.max(0, v) - getStageLog(hid, day, sid), sid, Date.now(), k);
 }
+
+/** Ключ журнала восполнения старых долгов каза. */
+export const QADA_LOG = '__qada';
 
 export function setNote(day, text) {
   update((d) => {

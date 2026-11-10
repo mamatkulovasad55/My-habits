@@ -1097,3 +1097,22 @@ body.is-gate .tabbar { display: none; }
 /* в Telegram шапку рисует сам Telegram — меньше отступ сверху */
 .is-tg .view { padding-top: 4px; }
 .is-tg .page-head { padding-top: 10px; }
+
+/* ---------- Каза, Джума ---------- */
+.stage-dots i.is-qada { background: var(--orange); }
+.stage-dots i.is-missed { background: var(--red); opacity: 0.85; }
+.hsub .debt { color: var(--red); font-weight: 600; }
+.stage-row.st-qada .row-main .muted { color: var(--orange); }
+.stage-row.st-missed .row-main b { color: var(--red); }
+.stage-row.st-missed .row-main .muted { color: var(--red); opacity: 0.85; }
+.qada-pill { --c: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange); white-space: nowrap; }
+.qada-goal .progress > div { background: var(--orange); }
+.calc { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; color: var(--label-2); }
+.calc .unit-field .field { width: 70px; }
+.calc .btn { min-height: 40px; padding: 0 14px; font-size: 15px; }
+.qada-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+.qada-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--label-2); }
+.qada-grid .field { text-align: center; padding: 8px; }
+.sheet .qada-grid .field, .sheet .calc .field { background: var(--fill); }
+.choice + .choice { margin-top: 8px; }
+.confirm .btn-plain { margin-top: 4px; }
