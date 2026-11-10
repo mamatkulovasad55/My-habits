@@ -1,8 +1,8 @@
 // Расписание этапов и напоминаний. Чистая логика: используется и в приложении, и в Cloudflare Worker.
 import { prayerTimes, tzOffsetHours, PRAYER_NAME, fmtMin } from './prayer.js';
-import { getData, habitsActive, abstainAll, getEvents } from './store.js';
-import { isScheduled, isDone, valueOf, hasStages, stageDone, firstDay } from './logic.js';
-import { dkey, plural, addDays, today } from './util.js';
+import { getData, habitsActive, abstainAll, getEvents, QADA_LOG } from './store.js';
+import { isScheduled, isDone, valueOf, hasStages, stageDone, firstDay, stageActive } from './logic.js';
+import { dkey, plural, addDays, today, parseKey, startOfDay } from './util.js';
 
 export const parseHM = (s) => {
   const [h, m] = String(s || '0:0').split(':').map(Number);
@@ -49,15 +49,35 @@ export function timeLabel(time) {
 
 const PRAYER_NEXT = { fajr: 'sunrise', dhuhr: 'asr', asr: 'maghrib', maghrib: 'isha', isha: null };
 
+export const isFriday = (date) => date.getDay() === 5;
+
+/** Ключ намаза этапа: fajr…isha или vitr; null — если этап не намаз. */
+export const prayerKeyOf = (s) => (s.role === 'vitr' ? 'vitr' : s.time?.mode === 'prayer' ? s.time.prayer : null);
+export const isNamazHabit = (h) => hasStages(h) && h.stages.some((s) => prayerKeyOf(s));
+
 /** Этапы привычки на день с окнами времени [start, end). */
 export function stagesForDay(h, date, ctx = dayContext(date)) {
   if (!hasStages(h)) return [];
-  const list = h.stages.map((s) => ({ ...s, start: resolveTime(s.time, ctx) }));
+  const juma = ctx.settings?.juma;
+  const list = h.stages
+    .filter((s) => stageActive(s, date))
+    .map((s) => {
+      const out = { ...s, start: resolveTime(s.time, ctx) };
+      // пятница: вместо Зухра — Джума в мечети
+      if (juma?.enabled && isFriday(date) && s.time?.mode === 'prayer' && s.time.prayer === 'dhuhr' && s.role !== 'vitr') {
+        out.juma = true;
+        out.name = 'Джума';
+        out.start = parseHM(juma.time || '13:00');
+        out.remindAt = out.start - (Number(juma.lead) || 0);
+      }
+      return out;
+    });
   const sorted = [...list].filter((s) => s.start != null).sort((a, b) => a.start - b.start);
   for (const s of list) {
     if (s.start == null) continue;
     if (s.time?.mode === 'prayer') {
-      const nx = PRAYER_NEXT[s.time.prayer];
+      // Витр и Иша — до Фаджра следующего дня
+      const nx = s.role === 'vitr' ? null : PRAYER_NEXT[s.time.prayer];
       s.end = nx ? ctx.prayers[nx] : ctx.prayers.fajr + 1440;
     } else {
       const next = sorted.find((x) => x.start > s.start);
@@ -108,11 +128,15 @@ export function dueReminders(date, fromMin, toMin) {
         const isPrayer = s.time?.mode === 'prayer';
         if (!isPrayer && inQuiet(s.start, settings)) continue;
         const amount = h.type === 'count' ? ` · ${s.min === s.max || !s.max ? s.min : `${s.min}–${s.max}`} ${h.unit || ''}`.trimEnd() : '';
-        if (inWindow(s.start)) {
+        const vitr = s.time?.prayer === 'isha' && s.role !== 'vitr' && h.stages.some((x) => x.role === 'vitr' && stageActive(x, date) && !stageDone(h, key, x));
+        const nameFull = vitr ? `${s.name} и Витр` : s.name;
+        if (inWindow(s.remindAt ?? s.start)) {
           out.push({
             key: `${key}:${h.id}:${s.id}:1`,
-            title: `${h.emoji} ${isPrayer ? `${s.name} · ${fmtMin(s.start)}` : `${h.name} · ${s.name}`}`,
-            body: isPrayer ? `Время намаза ${s.name}. Не забудь отметить в трекере.` : `Пора${amount ? `: ${amount.replace(' · ', '')}` : ''} — отметь, когда сделаешь.`,
+            title: s.juma ? `🕌 Джума в ${fmtMin(s.start)}` : `${h.emoji} ${isPrayer ? `${nameFull} · ${fmtMin(s.start)}` : `${h.name} · ${s.name}`}`,
+            body: s.juma
+              ? `Пора собираться в мечеть — до Джума ${s.start - s.remindAt} мин.`
+              : isPrayer ? `Время намаза ${nameFull}. Не забудь отметить в трекере.` : `Пора${amount ? `: ${amount.replace(' · ', '')}` : ''} — отметь, когда сделаешь.`,
             url: './#today',
           });
         }
@@ -122,7 +146,7 @@ export function dueReminders(date, fromMin, toMin) {
           if (inWindow(r) && (isPrayer || !inQuiet(r, settings))) {
             out.push({
               key: `${key}:${h.id}:${s.id}:2`,
-              title: `${h.emoji} ${isPrayer ? `${s.name} ещё не отмечен` : `${h.name} · ${s.name}`}`,
+              title: `${h.emoji} ${isPrayer ? `${s.juma ? 'Зухр' : nameFull} ещё не отмечен` : `${h.name} · ${s.name}`}`,
               body: isPrayer ? `До конца времени осталось около 25 минут (до ${fmtMin(s.end)}).` : 'Ещё не отмечено — напоминаю.',
               url: './#today',
             });
@@ -152,12 +176,130 @@ export function dueReminders(date, fromMin, toMin) {
       const parts = [];
       if (left.length) parts.push(`осталось ${left.length} ${plural(left.length, ['привычка', 'привычки', 'привычек'])}: ${left.slice(0, 3).map((h) => h.name).join(', ')}${left.length > 3 ? '…' : ''}`);
       if (abst.length) parts.push(`отметь чистый день: ${abst.map((a) => a.name).join(', ')}`);
+      const debt = qadaDebt(date, toMin).total;
+      if (debt) parts.push(`долг каза: ${debt}`);
       out.push({ key: `${key}:checkin`, title: '🌙 Вечерний чек-ин', body: parts.join('; ').replace(/^./, (c) => c.toUpperCase()), url: './#checkin' });
     }
   }
   return out;
 }
 
+
+// ================= Статусы этапов и каза =================
+
+/** Минуты «сейчас» относительно полуночи дня date (для вчерашней Иши может быть > 1440). */
+function minutesFrom(date, now) {
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  return days * 1440 + now.getHours() * 60 + now.getMinutes();
+}
+
+/** Последняя положительная отметка этапа. */
+export function stageMark(h, day, s) {
+  const pos = getEvents(h.id, typeof day === 'string' ? day : dkey(day)).filter((e) => e.s === s.id && e.d > 0);
+  return pos[pos.length - 1] || null;
+}
+
+/** Время этапа уже вышло? */
+export function stageExpired(date, s, now = new Date()) {
+  return s.end != null && minutesFrom(date, now) > s.end;
+}
+
+/**
+ * Статус этапа: ontime | late | qada | missed | pending | untracked.
+ * missed — время вышло и не отмечено (это долг каза); untracked — до включения учёта каза.
+ */
+export function stageStatus(h, date, s, now = new Date()) {
+  const key = dkey(date);
+  if (stageDone(h, key, s)) {
+    const m = stageMark(h, key, s);
+    return m?.k === 'qada' ? 'qada' : m?.k === 'late' ? 'late' : 'ontime';
+  }
+  if (!stageExpired(date, s, now)) return 'pending';
+  const since = getData().settings.qada?.since;
+  if (!since || key < since || !prayerKeyOf(s)) return 'untracked';
+  return 'missed';
+}
+
+export const QADA_KEYS = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha', 'vitr'];
+export const QADA_NAMES = { fajr: 'Фаджр', dhuhr: 'Зухр', asr: 'Аср', maghrib: 'Магриб', isha: 'Иша', vitr: 'Витр' };
+
+/**
+ * Долг каза по каждому намазу.
+ * { total, byPrayer: { fajr: { missed: [{hid, day, sid}], oldLeft, total } }, oldLeft, repaidToday }
+ * dateArg/minArg — для сервера (наивная дата и минута); в приложении берётся текущее время.
+ */
+export function qadaDebt(dateArg, minArg) {
+  const data = getData();
+  const q = data.settings.qada || {};
+  const now = dateArg ? new Date(dateArg.getFullYear(), dateArg.getMonth(), dateArg.getDate(), 0, minArg ?? 0) : new Date();
+  const t = startOfDay(now);
+  const byPrayer = Object.fromEntries(QADA_KEYS.map((k) => [k, { missed: [], oldLeft: 0, total: 0 }]));
+  if (q.since) {
+    for (const h of habitsActive().filter(isNamazHabit)) {
+      let d = parseKey(q.since);
+      const first = firstDay(h);
+      if (d < first) d = first;
+      for (let i = 0; d <= t && i < 3700; d = addDays(d, 1), i++) {
+        if (!isScheduled(h, d)) continue;
+        const key = dkey(d);
+        for (const s of stagesForDay(h, d)) {
+          const p = prayerKeyOf(s);
+          if (p && stageStatus(h, d, s, now) === 'missed') byPrayer[p].missed.push({ hid: h.id, day: key, sid: s.id });
+        }
+      }
+    }
+  }
+  // старые долги минус восполненное
+  const repaid = Object.fromEntries(QADA_KEYS.map((k) => [k, 0]));
+  let repaidToday = 0;
+  const tk = dkey(t);
+  for (const [day, e] of Object.entries(data.logs[QADA_LOG] || {})) {
+    for (const ev of e.ev || []) {
+      if (repaid[ev.s] != null) repaid[ev.s] += ev.d || 0;
+      if (day === tk && ev.d > 0) repaidToday += ev.d;
+    }
+  }
+  // восполнения пропусков по трекеру сегодня тоже считаются в дневную цель
+  for (const h of habitsActive().filter(isNamazHabit)) {
+    for (const [, e] of Object.entries(data.logs[h.id] || {})) {
+      for (const ev of e.ev || []) if (ev.k === 'qada' && ev.d > 0 && dkey(new Date(ev.ts)) === tk) repaidToday += 1;
+    }
+  }
+  let total = 0;
+  let oldLeft = 0;
+  for (const k of QADA_KEYS) {
+    const b = byPrayer[k];
+    b.oldLeft = Math.max(0, (Number(q.old?.[k]) || 0) - repaid[k]);
+    b.total = b.missed.length + b.oldLeft;
+    total += b.total;
+    oldLeft += b.oldLeft;
+  }
+  return { total, oldLeft, byPrayer, repaidToday, perDay: Math.max(0, Number(q.perDay) || 0) };
+}
+
+/** Итоги намазов за n дней: вовремя / отмечено поздно / каза / пропущено, Джума. */
+export function namazStats(h, days = 30) {
+  const res = { ontime: 0, late: 0, qada: 0, missed: 0, juma: 0, jumaDhuhr: 0, fridays: 0 };
+  const t = today();
+  const now = new Date();
+  const first = firstDay(h);
+  for (let i = 0; i < days; i++) {
+    const d = addDays(t, -i);
+    if (d < first) break;
+    for (const s of stagesForDay(h, d)) {
+      if (!prayerKeyOf(s)) continue;
+      const st = stageStatus(h, d, s, now);
+      if (res[st] != null) res[st]++;
+      if (s.juma) {
+        if (st !== 'pending' && st !== 'untracked') res.fridays++;
+        const m = stageMark(h, d, s);
+        if (m?.k === 'juma') res.juma++;
+        else if (m) res.jumaDhuhr++;
+      }
+    }
+  }
+  return res;
+}
 
 // ================= Статистика по времени нажатий =================
 
@@ -198,7 +340,7 @@ export function timeStats(h, days = 60) {
         st.times.push(m);
         const w = win.find((x) => x.id === st.id);
         if (w && w.start != null) {
-          if (m >= w.start - 30 && m <= (w.end ?? w.start + 120)) st.onTime++;
+          if (e.k !== 'qada' && e.k !== 'late' && m >= w.start - 30 && m <= (w.end ?? w.start + 120)) st.onTime++;
           else st.late++;
         }
       }
