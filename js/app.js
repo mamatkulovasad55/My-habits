@@ -1382,6 +1382,7 @@ function viewSettings() {
 
     <div class="group-title">Резервная копия</div>
     <div class="card list-group">
+      <button class="row" data-s="backup">${icon.cloud(20)}<span>Прислать бэкап в бота</span></button>
       <button class="row" data-s="export">${icon.archive(20)}<span>Экспорт в JSON</span></button>
       <label class="row">${icon.undo(20)}<span>Импорт из JSON</span><input type="file" accept="application/json,.json" data-s="import" hidden></label>
       <button class="row is-danger" data-s="wipe">${icon.trash(20)}<span>Удалить все данные</span></button>
@@ -1552,6 +1553,19 @@ function mountSettings() {
   if (q('now')) q('now').onclick = () => sync.syncNow();
   view.querySelectorAll('[data-seg=theme] button').forEach((b) => (b.onclick = () => setSetting('theme', b.dataset.value)));
   view.querySelectorAll('[data-restore]').forEach((b) => (b.onclick = () => upsertHabit({ id: b.dataset.restore, archived: false })));
+  q('backup').onclick = async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      await sync.syncNow();
+      const r = await sync.api('/api/backup', {});
+      toast(`Бэкап отправлен в бота · ${r.events} ${plural(r.events, ['событие', 'события', 'событий'])}`);
+    } catch (err) {
+      toast(err.message || 'Не удалось отправить бэкап');
+    } finally {
+      b.disabled = false;
+    }
+  };
   q('export').onclick = () => {
     const blob = new Blob([stableStringify(getData(), 1)], { type: 'application/json' });
     const a = document.createElement('a');

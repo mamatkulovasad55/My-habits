@@ -54,6 +54,16 @@ export async function tg(botToken, method, body) {
   return res.json().catch(() => ({ ok: false }));
 }
 
+/** Отправить файл документом (multipart). */
+export async function tgDocument(botToken, { chat_id, caption, filename, content, type = 'application/json' }) {
+  const fd = new FormData();
+  fd.append('chat_id', String(chat_id));
+  if (caption) fd.append('caption', caption);
+  fd.append('document', new Blob([content], { type }), filename);
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: 'POST', body: fd });
+  return res.json().catch(() => ({ ok: false }));
+}
+
 export const escHtml = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 
 /** Кнопка «Открыть трекер» под сообщением. */

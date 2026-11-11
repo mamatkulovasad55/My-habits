@@ -102,11 +102,15 @@ export function prayerTimes(y, m, d, p, tzOffsetHours) {
 }
 
 /** Смещение часового пояса (в часах) для даты в IANA-зоне. */
+const TZ_FMT = new Map(); // создание Intl.DateTimeFormat дорогое — переиспользуем
+
 export function tzOffsetHours(tz, date = new Date()) {
   if (!tz) return -date.getTimezoneOffset() / 60;
   try {
+    let fmt = TZ_FMT.get(tz);
+    if (!fmt) TZ_FMT.set(tz, (fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })));
     const parts = Object.fromEntries(
-      new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+      fmt
         .formatToParts(date)
         .map((x) => [x.type, x.value]),
     );
