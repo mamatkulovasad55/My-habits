@@ -1080,6 +1080,23 @@ select.field.compact { padding-right: 30px; }
 .advanced { margin-top: 12px; }
 .advanced summary { color: var(--accent); font-size: 15px; cursor: pointer; padding: 4px 0; }
 
+/* Сверка времени намаза */
+.source-badge { margin-top: 12px; font-size: 13px; color: var(--label-2); }
+.source-badge.is-ok { color: var(--green); }
+.calib-date { margin-top: 14px; padding-top: 10px; border-top: 0.5px solid var(--sep); }
+.calib-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.calib-head > span { display: flex; gap: 14px; }
+.calib-table { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 44px; column-gap: 14px; row-gap: 6px; margin-top: 8px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.calib-table .th { font-size: 12px; color: var(--label-2); text-transform: uppercase; letter-spacing: 0.02em; }
+.calib-table .delta { text-align: right; font-weight: 600; }
+.calib-table .delta.is-zero { color: var(--label-3); }
+.calib-table .delta.is-ok { color: var(--green); }
+.calib-table .delta.is-off { color: var(--orange); }
+.calib-warn { margin: 12px 0 0; font-size: 13px; color: var(--orange); line-height: 1.4; }
+.calib-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.calib-actions .btn { flex: 1 1 100%; }
+.calib-input input[type="time"].field.compact { flex: none; width: 132px; }
+
 .pill.is-on { background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); }
 .switch-row > span:first-child { min-width: 0; }
 select.field.compact { flex: none; width: 150px; }

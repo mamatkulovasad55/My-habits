@@ -14,15 +14,16 @@ import {
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
-import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
+import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
+import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
   weekdayLetter, openSheet, refreshLiveSheets, confirmSheet, toast, haptic, segmented, topSheet,
 } from './ui.js';
 import {
   uid, dkey, parseKey, today, todayKey, addDays, startOfWeek, esc, plural, fmtDayLong, fmtDateShort, fmtDateTime,
-  fmtClock, fmtDuration, durationParts, pad, clamp, DAY_FORMS, MONTHS, WEEKDAYS_SHORT, stableStringify,
+  fmtClock, fmtDuration, durationParts, pad, clamp, DAY_FORMS, MONTHS, MONTHS_GEN, WEEKDAYS_SHORT, stableStringify,
 } from './util.js';
 
 const view = document.getElementById('view');
@@ -382,6 +383,8 @@ function choiceSheet({ title, message = '', options }) {
   });
 }
 
+const GENITIVE = { fajr: 'Фаджра', dhuhr: 'Зухра', asr: 'Асра', maghrib: 'Магриба', isha: 'Иши', vitr: 'Витра', juma: 'Джума' };
+
 /** Отметить этап; для намаза — с вопросами про каза и Джума. */
 function markStage(h, date, s, { undo = true } = {}) {
   const key = dkey(date);
@@ -392,6 +395,12 @@ function markStage(h, date, s, { undo = true } = {}) {
     if (undo) toast(label, { action: 'Отменить', onAction: () => setStageLog(h.id, key, s.id, cur) });
   };
   const isPrayer = Boolean(prayerKeyOf(s));
+  const notYet = isPrayer ? prayerNotStarted(date, s) : null;
+  if (notYet != null) {
+    haptic(30);
+    const when = dkey(date) === todayKey() ? `с ${fmtMin(notYet)}` : `${fmtDateShort(date)} с ${fmtMin(notYet)}`;
+    return toast(`Время ${GENITIVE[s.juma ? 'juma' : prayerKeyOf(s)] || 'намаза'} ещё не наступило — ${when}`);
+  }
   const expired = isPrayer && stageExpired(date, s);
   if (expired) {
     const name = s.juma ? 'Джума' : s.name;
@@ -463,7 +472,8 @@ function stagedCard(h, day) {
   if (st) {
     const t = st.start != null ? fmtMin(st.start) : '';
     const amount = h.type === 'count' ? ` · ${st.max && st.max !== st.min ? `${st.min}–${st.max}` : st.min}` : '';
-    sub.push(`<span class="next-stage">${esc(st.name)}${st.overnight ? ' (вчера)' : t ? ` ${t}` : ''}${amount}</span>`);
+    const early = !st.overnight && prayerNotStarted(day, st) != null;
+    sub.push(`<span class="next-stage">${esc(st.name)}${st.overnight ? ' (вчера)' : t ? ` ${early ? 'с ' : ''}${t}` : ''}${amount}</span>`);
   } else if (!done) {
     sub.push('все этапы отмечены');
   }
@@ -1461,8 +1471,10 @@ function prayerSection() {
         <button class="btn btn-secondary" data-pr="geo">📍 Где я</button>
       </div>
       ${known ? '' : `<div class="form-grid"><label><span>Широта</span><input class="field" type="number" step="any" data-set="prayer.lat" data-num value="${esc(p.lat)}"></label><label><span>Долгота</span><input class="field" type="number" step="any" data-set="prayer.lon" data-num value="${esc(p.lon)}"></label></div>`}
+      ${prayerSourceBadge(st)}
       <div class="prayer-table">${rows}</div>
-      <p class="hint">Сегодня, ${esc(p.city || '')}. Кнопки ± сдвигают время на минуту — сверь с расписанием своей мечети или namozvaqti.uz.</p>
+      <p class="hint">Сегодня, ${esc(p.city || '')}. Кнопки ± сдвигают время на минуту. Точнее — через «Сверку с расписанием» ниже (muslim.uz или расписание мечети).</p>
+      ${calibrationBlock(st)}
       <details class="advanced"><summary>Метод расчёта</summary>
         <div class="form-grid">
           <label><span>Угол Фаджра, °</span><input class="field" type="number" step="0.5" data-set="prayer.fajrAngle" data-num value="${esc(p.fajrAngle)}"></label>
@@ -1473,6 +1485,134 @@ function prayerSection() {
     </div>
     ${jumaSection()}
     ${qadaSettingsSection()}`;
+}
+
+// ---------- Сверка времени намаза с расписанием ----------
+
+const CALIB_LABEL = { fajr: 'Фаджр', sunrise: 'Восход', dhuhr: 'Зухр', asr: 'Аср', maghrib: 'Магриб', isha: 'Иша' };
+const CALIB_LOCAL = { fajr: 'Бомдод', sunrise: 'Куёш', dhuhr: 'Пешин', asr: 'Аср', maghrib: 'Шом', isha: 'Хуфтон' };
+let calibOpen = false;
+const fmtKeyLong = (k) => {
+  const d = parseKey(k);
+  return `${d.getDate()} ${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}`;
+};
+const signed = (n) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '0');
+
+function prayerSourceBadge(st) {
+  const src = prayerSource(st);
+  if (src.kind === 'formula') return `<div class="source-badge">Источник: формула (метод Узбекистана)</div>`;
+  return `<div class="source-badge is-ok">✓ Сверено с расписанием · ${fmtKeyLong(src.at)}${src.kind === 'calibrated+manual' ? ' · есть ручная правка' : ''}</div>`;
+}
+
+function calibrationBlock(st) {
+  const { rows, summary } = calibrationReport(st);
+  const seasonal = Object.entries(summary).filter(([, x]) => x.seasonal);
+  const deltaCls = (d) => (d == null ? '' : d === 0 ? 'is-zero' : Math.abs(d) <= 1 ? 'is-ok' : 'is-off');
+  return `<details class="advanced" data-calib ${calibOpen ? 'open' : ''}><summary>Сверка с расписанием${rows.length ? ` · ${rows.length} ${plural(rows.length, ['дата', 'даты', 'дат'])}` : ''}</summary>
+    <p class="hint">Введи время с muslim.uz или из расписания мечети на любую дату — приложение покажет разницу и запишет средние поправки. Лучше сверить 2–3 даты в разные сезоны.</p>
+    ${rows.map((r) => `<div class="calib-date">
+      <div class="calib-head"><b>${fmtKeyLong(r.date)}</b><span><button class="link-btn small" data-calib-edit="${r.date}">Изменить</button><button class="link-btn danger" data-calib-del="${r.date}">Удалить</button></span></div>
+      <div class="calib-table">
+        <span class="th">Намаз</span><span class="th">Эталон</span><span class="th">Приложение</span><span class="th">Δ</span>
+        ${r.items.map((x) => `<span>${CALIB_LABEL[x.k]}</span><span>${x.ref == null ? '—' : fmtMin(x.ref)}</span><span>${fmtMin(x.cur)}</span><span class="delta ${deltaCls(x.delta)}">${x.delta == null ? '' : signed(x.delta)}</span>`).join('')}
+      </div>
+    </div>`).join('')}
+    ${seasonal.map(([k, x]) => `<p class="calib-warn">⚠ ${CALIB_LABEL[k]}: поправка зависит от сезона (разброс ${x.spread} мин) — сверь ещё зимой/летом.</p>`).join('')}
+    <div class="calib-actions">
+      <button class="btn btn-secondary" data-calib-add>+ Добавить дату</button>
+      ${rows.length ? `<button class="btn btn-primary" data-calib-apply>Применить поправки</button>` : ''}
+    </div>
+  </details>`;
+}
+
+const toHM = (m) => fmtMin(((m % 1440) + 1440) % 1440);
+
+function openCalibrationEditor(date) {
+  const st = getData().settings;
+  const existing = (st.prayer.calib?.refs || []).find((r) => r.date === date);
+  let day = date || todayKey();
+  const values = () => {
+    const calc = timesFor(day, st, st.prayer.adj || {});
+    const ref = (st.prayer.calib?.refs || []).find((r) => r.date === day);
+    return Object.fromEntries(CALIB_KEYS.map((k) => [k, ref?.t?.[k] ?? calc[k]]));
+  };
+  let v = existing ? { ...existing.t } : values();
+  openSheet({
+    render: () => `
+      <header class="sheet-header">
+        <button class="link-btn" data-e="cancel">Отмена</button>
+        <strong>Эталонное время</strong>
+        <button class="link-btn strong" data-e="save">Готово</button>
+      </header>
+      <div class="sheet-body">
+        <div class="group-title">Дата</div>
+        <div class="card pad"><input class="field" type="date" data-e="date" value="${day}"></div>
+        <div class="group-title">Время по расписанию</div>
+        <div class="card list-group">
+          ${CALIB_KEYS.map((k) => `<label class="row static calib-input"><div class="row-main"><b>${CALIB_LABEL[k]}</b><span class="muted">${CALIB_LOCAL[k]}</span></div><input class="field compact" type="time" data-t="${k}" value="${toHM(v[k])}"></label>`).join('')}
+        </div>
+        <p class="hint">Поля заполнены расчётным временем приложения — поправь те, что отличаются от расписания.</p>
+      </div>`,
+    mount: (api) => {
+      const q = (s) => api.el.querySelector(`[data-e=${s}]`);
+      q('cancel').onclick = () => api.close();
+      q('date').onchange = (e) => {
+        if (!e.target.value) return;
+        day = e.target.value;
+        v = values();
+        api.refresh();
+      };
+      api.el.querySelectorAll('[data-t]').forEach((inp) => (inp.oninput = inp.onchange = () => {
+        if (inp.value) v[inp.dataset.t] = parseHM(inp.value);
+      }));
+      q('save').onclick = () => {
+        update((d) => {
+          d.settings.prayer = withRef(d.settings.prayer, day, { ...v });
+          d.settings.updatedAt = Date.now();
+        });
+        calibOpen = true;
+        api.close();
+        toast('Эталон сохранён');
+      };
+    },
+  });
+}
+
+function mountCalibration() {
+  const det = view.querySelector('[data-calib]');
+  if (!det) return;
+  det.ontoggle = () => (calibOpen = det.open);
+  view.querySelector('[data-calib-add]').onclick = () => openCalibrationEditor();
+  view.querySelectorAll('[data-calib-edit]').forEach((b) => (b.onclick = () => openCalibrationEditor(b.dataset.calibEdit)));
+  view.querySelectorAll('[data-calib-del]').forEach((b) => (b.onclick = () => confirmSheet({
+    title: `Удалить эталон на ${fmtKeyLong(b.dataset.calibDel)}?`,
+    message: 'Уже применённые поправки не изменятся.',
+    confirm: 'Удалить',
+    destructive: true,
+    onConfirm: () => update((d) => {
+      d.settings.prayer = withoutRef(d.settings.prayer, b.dataset.calibDel);
+      d.settings.updatedAt = Date.now();
+    }),
+  })));
+  const apply = view.querySelector('[data-calib-apply]');
+  if (apply) apply.onclick = () => {
+    const st = getData().settings;
+    const { summary } = calibrationReport(st);
+    const parts = CALIB_KEYS.filter((k) => summary[k]).map((k) => `${CALIB_LABEL[k]} ${signed(summary[k].adj)}`);
+    const warn = CALIB_KEYS.filter((k) => summary[k]?.seasonal).map((k) => CALIB_LABEL[k]);
+    confirmSheet({
+      title: 'Применить поправки?',
+      message: `${parts.join(', ')} мин.${warn.length ? ` По ${warn.join(', ')} разброс между датами больше 2 мин — взято среднее.` : ''} Напоминания и отметки «вовремя / каза» будут считаться по новому времени.`,
+      confirm: 'Применить',
+      onConfirm: () => {
+        update((d) => {
+          d.settings.prayer = applyCalibration(d.settings, todayKey());
+          d.settings.updatedAt = Date.now();
+        });
+        toast('Поправки применены');
+      },
+    });
+  };
 }
 
 function jumaSection() {
@@ -1520,6 +1660,7 @@ function mountPrefs() {
     const k = b.dataset.adj;
     setSetting(`prayer.adj.${k}`, (getData().settings.prayer.adj?.[k] || 0) + Number(b.dataset.delta));
   }));
+  mountCalibration();
   view.querySelectorAll('[data-seg=asr] button').forEach((b) => (b.onclick = () => setSetting('prayer.asr', b.dataset.value)));
   const calc = view.querySelector('#qada-calc');
   if (calc) calc.onclick = () => {

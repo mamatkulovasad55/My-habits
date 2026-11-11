@@ -106,10 +106,10 @@ export function stagesForDay(h, date, ctx = dayContext(date)) {
   return list;
 }
 
-/** Текущий этап: последний начавшийся невыполненный, иначе ближайший невыполненный. */
 /** Через сколько минут после начала Иши повторить напоминание, если не отмечено. */
 export const ISHA_REPEAT_AFTER = 150;
 
+/** Текущий этап: последний начавшийся невыполненный, иначе ближайший невыполненный. */
 export function currentStage(h, date, nowMin, ctx) {
   const key = dkey(date);
   const st = stagesForDay(h, date, ctx);
@@ -230,6 +230,17 @@ function minutesFrom(date, now) {
 export function stageMark(h, day, s) {
   const pos = getEvents(h.id, typeof day === 'string' ? day : dkey(day)).filter((e) => e.s === s.id && e.d > 0);
   return pos[pos.length - 1] || null;
+}
+
+/**
+ * Намаз, время которого ещё не наступило: возвращает минуту начала (от полуночи дня date), иначе null.
+ * Начало — настоящее время намаза без сдвига этапа: для Джума это время Зухра, для Витра — время Иши.
+ */
+export function prayerNotStarted(date, s, now = new Date()) {
+  if (s?.time?.mode !== 'prayer') return null;
+  const earliest = dayContext(date).prayers[s.time.prayer];
+  if (earliest == null) return null;
+  return minutesFrom(date, now) < earliest ? earliest : null;
 }
 
 /** Время этапа уже вышло? */
