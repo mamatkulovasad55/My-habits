@@ -1,5 +1,6 @@
 // Бизнес-логика: расписания, серии, проценты, воздержание, достижения.
 import { getData, getLog, getStageLog, getEvents, habitsActive, habitsAll, abstainAll, subscribe } from './store.js';
+import { isHijriScheduled, hijriRuleText } from './hijri.js';
 import { addDays, dkey, parseKey, startOfDay, startOfWeek, today, plural, DAY_FORMS, TIMES_FORMS, WEEKDAYS_SHORT } from './util.js';
 
 const DAY = 86400000;
@@ -71,6 +72,7 @@ const daysIntoWeek = (d) => (d.getDay() + 6) % 7;
 export function isScheduled(h, date) {
   const s = h.schedule || { kind: 'daily' };
   if (s.kind === 'weekdays') return (s.days || []).includes(date.getDay());
+  if (s.kind === 'hijri') return isHijriScheduled(s.hijri, date, getData().settings);
   if (s.kind === 'perWeek') {
     // «N раз в неделю»: нужна, пока недельная норма не выполнена (или если уже сделана сегодня)
     return doneInWeek(h, date, { before: true }) < (s.times || 1) || isDone(h, date);
@@ -95,6 +97,7 @@ export function scheduleText(h) {
     return days.map((d) => WEEKDAYS_SHORT[d]).join(', ');
   }
   if (s.kind === 'perWeek') return `${s.times} ${plural(s.times, TIMES_FORMS)} в неделю`;
+  if (s.kind === 'hijri') return hijriRuleText(s.hijri);
   return 'Каждый день';
 }
 

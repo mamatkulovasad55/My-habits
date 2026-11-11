@@ -29,6 +29,7 @@ export function defaultSettings() {
     push: { workerUrl: '' },
     juma: { enabled: true, time: '13:00', lead: 45 },
     qada: { since: '', perDay: 2, old: { fajr: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0, vitr: 0 } },
+    hijri: { offsets: [] }, // сдвиги месяцев по объявлению УМУ: [{ y, m, offset }]
   };
 }
 
@@ -57,6 +58,7 @@ function normalizeSettings(s) {
     push: { ...d.push, ...(s.push || {}) },
     juma: { ...d.juma, ...(s.juma || {}) },
     qada: { ...d.qada, ...(s.qada || {}), old: { ...d.qada.old, ...(s.qada?.old || {}) } },
+    hijri: { ...d.hijri, ...(s.hijri || {}), offsets: Array.isArray(s.hijri?.offsets) ? s.hijri.offsets : [] },
   };
 }
 

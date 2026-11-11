@@ -1143,3 +1143,11 @@ body.is-gate .tabbar { display: none; }
 .stage-dots.is-soft i.is-missed { background: var(--label-3); opacity: 1; }
 .stage-list.is-soft .stage-row.st-missed .row-main b { color: inherit; }
 .stage-list.is-soft .stage-row.st-missed .row-main .muted { color: var(--label-2); opacity: 1; }
+
+/* Хиджрийский календарь */
+.hijri-line { margin-top: 2px; font-size: 15px; color: var(--label-2); }
+.hijri-line .hijri-eve { color: var(--accent); }
+.hijri-today { font-size: 17px; }
+.chips.hijri-days { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.chips.hijri-days .chip { min-width: 0; padding: 8px 0; text-align: center; }
+.segmented[data-seg="sched"] { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }

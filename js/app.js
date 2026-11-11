@@ -16,6 +16,7 @@ import {
 } from './logic.js';
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
+import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -113,7 +114,12 @@ function viewToday() {
   const habits = habitsActive().filter((h) => firstDay(h) <= day || isToday);
   const due = [];
   const other = [];
-  for (const h of habits) (isScheduled(h, day) ? due : other).push(h);
+  for (const h of habits) {
+    const sch = isScheduled(h, day);
+    // хиджрийское расписание (например, 13–15 числа): в остальные дни привычку не показываем
+    if (!sch && h.schedule?.kind === 'hijri' && !valueOf(h, day)) continue;
+    (sch ? due : other).push(h);
+  }
   const s = dayStats(day);
 
   const strip = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6))
@@ -159,6 +165,7 @@ function viewToday() {
       <div>
         <button class="eyebrow eyebrow-btn" data-action="pick-date">${esc(fmtDayLong(day))}</button>
         <h1>${isToday ? 'Сегодня' : esc(day.toLocaleDateString('ru-RU', { weekday: 'long' }).replace(/^./, (c) => c.toUpperCase()))}</h1>
+        ${hijriLine(day, isToday)}
       </div>
       <div class="head-actions">
         ${!isToday ? `<button class="pill" data-action="go-today">Сегодня</button>` : ''}
@@ -430,6 +437,18 @@ function markStage(h, date, s, { undo = true } = {}) {
     });
   }
   done('', `${s.name} отмечен`);
+}
+
+/** Хиджрийская дата под заголовком; после Магриба сегодня — пометка «вечер N-го». */
+function hijriLine(day, isToday) {
+  const st = getData().settings;
+  const h = toHijri(day, st);
+  let evening = '';
+  if (isToday) {
+    const at = hijriAt(new Date(), st);
+    if (at.evening) evening = ` <span class="hijri-eve">· вечер ${at.d}-го</span>`;
+  }
+  return `<div class="hijri-line">${esc(formatHijri(h))}${evening}</div>`;
 }
 
 function habitCard(h, day) {
@@ -805,6 +824,7 @@ function openHabitEditor(existing) {
     ? JSON.parse(JSON.stringify(existing))
     : { name: '', emoji: '💧', color: COLORS[7], type: 'check', target: 8, unit: '', step: 1, schedule: { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3 } };
   f.schedule = { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3, ...(f.schedule || {}) };
+  f.schedule.hijri = { type: 'days', days: [13, 14, 15], m: 9, d: 1, from: 21, to: -1, ...(f.schedule.hijri || {}) };
   if (f.type === 'timer' && !existing) f.target = 30;
   f.stages = Array.isArray(f.stages) ? f.stages : [];
   f.useStages = f.stages.length > 0;
@@ -850,7 +870,8 @@ function openHabitEditor(existing) {
 
         <div class="group-title">Расписание</div>
         <div class="card pad">
-          ${segmented('sched', [{ value: 'daily', label: 'Каждый день' }, { value: 'weekdays', label: 'Дни недели' }, { value: 'perWeek', label: 'N в неделю' }], f.schedule.kind)}
+          ${segmented('sched', [{ value: 'daily', label: 'Каждый день' }, { value: 'weekdays', label: 'Дни недели' }, { value: 'perWeek', label: 'N в неделю' }, { value: 'hijri', label: 'Хиджра' }], f.schedule.kind)}
+          ${f.schedule.kind === 'hijri' ? hijriRuleEditor(f) : ''}
           ${f.schedule.kind === 'weekdays' ? `<div class="chips">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="chip ${f.schedule.days.includes(d) ? 'is-active' : ''}" style="--c:${f.color}" data-wd="${d}">${WEEKDAYS_SHORT[d]}</button>`).join('')}</div>` : ''}
           ${f.schedule.kind === 'perWeek' ? `<div class="inline-stepper"><button class="round-btn sm" data-e="tm">${icon.minus(16)}</button><span><b>${f.schedule.times}</b> ${plural(f.schedule.times, ['раз', 'раза', 'раз'])} в неделю</span><button class="round-btn sm" data-e="tp">${icon.plus(16)}</button></div>` : ''}
         </div>
@@ -896,6 +917,7 @@ function openHabitEditor(existing) {
         if (s.size) f.schedule.days = [...s];
         api.refresh();
       }));
+      mountHijriRuleEditor(el, f, api);
       mountStagesSection(el, f, api);
       if (q('tm')) q('tm').onclick = () => ((f.schedule.times = clamp(f.schedule.times - 1, 1, 6)), api.refresh());
       if (q('tp')) q('tp').onclick = () => ((f.schedule.times = clamp(f.schedule.times + 1, 1, 6)), api.refresh());
@@ -909,7 +931,7 @@ function openHabitEditor(existing) {
           target: f.type === 'check' ? 1 : Math.max(f.type === 'timer' ? 1 : 0.1, Number(String(f.target).replace(',', '.')) || 1),
           unit: f.type === 'count' ? String(f.unit || '').trim() : '',
           step: f.type === 'count' ? Math.max(0.1, Number(String(f.step).replace(',', '.')) || 1) : 1,
-          schedule: { kind: f.schedule.kind, days: [...f.schedule.days].sort(), times: f.schedule.times },
+          schedule: { kind: f.schedule.kind, days: [...f.schedule.days].sort(), times: f.schedule.times, ...(f.schedule.kind === 'hijri' ? { hijri: cleanHijriRule(f.schedule.hijri) } : {}) },
           stages: f.type !== 'timer' && f.useStages ? f.stages.filter((x) => x.name.trim()).map((x) => ({
             id: x.id || uid(),
             role: x.role,
@@ -930,6 +952,68 @@ function openHabitEditor(existing) {
       };
       if (isNew && !f.name) setTimeout(() => q('name')?.focus(), 320);
     },
+  });
+}
+
+// ---------- Хиджрийское расписание в редакторе ----------
+
+const monthSelect = (attr, m) => `<select class="field" ${attr}>${HIJRI_MONTHS.map((n, i) => `<option value="${i + 1}" ${+m === i + 1 ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+
+function hijriRuleEditor(f) {
+  const r = f.schedule.hijri;
+  const last = +r.from < 0 && +r.to === -1;
+  let body = '';
+  if (r.type === 'days') {
+    body = `<div class="chips hijri-days">${Array.from({ length: 30 }, (_, i) => i + 1).map((d) => `<button class="chip ${r.days.includes(d) ? 'is-active' : ''}" style="--c:${f.color}" data-hd="${d}">${d}</button>`).join('')}</div>
+      <p class="hint">Например, 13, 14, 15 — «белые дни». 30-е число бывает не в каждом месяце.</p>`;
+  } else if (r.type === 'date') {
+    body = `<div class="form-grid"><label><span>Месяц</span>${monthSelect('data-hm', r.m)}</label><label><span>Число</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hdd value="${esc(r.d)}"></label></div>`;
+  } else if (r.type === 'range') {
+    body = `<div class="form-grid"><label><span>Месяц</span>${monthSelect('data-hm', r.m)}</label></div>
+      <label class="switch-row mt"><span>Последние дни месяца</span><input type="checkbox" class="switch" data-hlast ${last ? 'checked' : ''}></label>
+      ${last
+        ? `<div class="form-grid"><label><span>Сколько последних дней</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hn value="${-r.from}"></label></div>`
+        : `<div class="form-grid"><label><span>С числа</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hfrom value="${Math.max(1, +r.from || 1)}"></label><label><span>По число</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hto value="${+r.to > 0 ? r.to : 30}"></label></div>`}`;
+  } else {
+    body = `<div class="form-grid"><label><span>Месяц</span>${monthSelect('data-hm', r.m)}</label></div>`;
+  }
+  return `<div class="mt">${segmented('hrule', [{ value: 'days', label: 'Числа' }, { value: 'date', label: 'Дата' }, { value: 'range', label: 'Диапазон' }, { value: 'month', label: 'Месяц' }], r.type)}</div>
+    <div class="mt">${body}</div>
+    <p class="hint">Даты по хиджрийскому календарю (Умм аль-Кура) со сдвигами УМУ из Настроек.</p>`;
+}
+
+function cleanHijriRule(r) {
+  const n = (x, lo, hi) => clamp(Math.round(Number(x) || lo), lo, hi);
+  if (r.type === 'days') return { type: 'days', days: [...new Set(r.days.map(Number))].sort((a, b) => a - b) };
+  if (r.type === 'date') return { type: 'date', m: n(r.m, 1, 12), d: n(r.d, 1, 30) };
+  if (r.type === 'range') {
+    if (+r.from < 0) return { type: 'range', m: n(r.m, 1, 12), from: -n(-r.from, 1, 30), to: -1 };
+    const from = n(r.from, 1, 30);
+    return { type: 'range', m: n(r.m, 1, 12), from, to: Math.max(from, n(r.to, 1, 30)) };
+  }
+  return { type: 'month', m: n(r.m, 1, 12) };
+}
+
+function mountHijriRuleEditor(el, f, api) {
+  const r = f.schedule.hijri;
+  el.querySelectorAll('[data-seg=hrule] button').forEach((b) => (b.onclick = () => ((r.type = b.dataset.value), api.refresh())));
+  el.querySelectorAll('[data-hd]').forEach((b) => (b.onclick = () => {
+    const d = Number(b.dataset.hd);
+    const s = new Set(r.days);
+    s.has(d) ? s.delete(d) : s.add(d);
+    if (s.size) r.days = [...s].sort((a, b) => a - b);
+    api.refresh();
+  }));
+  const on = (sel, fn) => { const x = el.querySelector(sel); if (x) x.onchange = () => fn(x); };
+  on('[data-hm]', (x) => (r.m = Number(x.value)));
+  on('[data-hdd]', (x) => (r.d = Number(x.value)));
+  on('[data-hn]', (x) => ((r.from = -Math.max(1, Number(x.value) || 10)), (r.to = -1)));
+  on('[data-hfrom]', (x) => (r.from = Number(x.value)));
+  on('[data-hto]', (x) => (r.to = Number(x.value)));
+  on('[data-hlast]', (x) => {
+    if (x.checked) Object.assign(r, { from: -10, to: -1 });
+    else Object.assign(r, { from: 21, to: 30 });
+    api.refresh();
   });
 }
 
@@ -1426,6 +1510,7 @@ function viewSettings() {
     ${notificationsSection()}
     ${routineSection()}
     ${prayerSection()}
+    ${hijriSection()}
 
     <div class="group-title">Оформление</div>
     <div class="card pad">${segmented('theme', [{ value: 'system', label: 'Как в системе' }, { value: 'light', label: 'Светлая' }, { value: 'dark', label: 'Тёмная' }], theme)}</div>
@@ -1514,6 +1599,85 @@ function prayerSection() {
     </div>
     ${jumaSection()}
     ${qadaSettingsSection()}`;
+}
+
+// ---------- Хиджрийский календарь ----------
+
+function hijriSection() {
+  const st = getData().settings;
+  const offs = [...(st.hijri?.offsets || [])].sort((a, b) => a.y - b.y || a.m - b.m);
+  const now = hijriAt(new Date(), st);
+  return `
+    <div class="group-title">Хиджрийский календарь</div>
+    <div class="card pad">
+      <div class="hijri-today"><b>${esc(formatHijri(toHijri(today(), st)))}</b>${now.evening ? `<span class="muted"> · после Магриба — ${now.d} ${esc(HIJRI_MONTHS[now.m - 1])}</span>` : ''}</div>
+      <p class="hint">Расчёт: Умм аль-Кура (${hijriEngine() === 'intl' ? 'встроенный календарь устройства' : 'встроенная таблица'}). Если УМУ объявило начало месяца на день раньше или позже — добавь сдвиг.</p>
+      ${offs.length ? `<div class="list-group mt">${offs.map((o) => `<div class="row static"><div class="row-main"><b>${esc(HIJRI_MONTHS[o.m - 1])} ${o.y}</b><span class="muted">сдвиг ${o.offset > 0 ? '+' : ''}${o.offset} ${plural(Math.abs(o.offset), DAY_FORMS)}</span></div><button class="icon-btn sm danger" data-hoff-del="${o.y}-${o.m}" aria-label="Удалить">${icon.close(16)}</button></div>`).join('')}</div>` : ''}
+      <button class="btn btn-secondary mt" data-hoff-add>${icon.plus(16)} Добавить сдвиг</button>
+    </div>`;
+}
+
+function openHijriOffsetEditor() {
+  const st = getData().settings;
+  const cur = toHijri(today(), st);
+  const f = { y: cur.y, m: cur.m, offset: 1 };
+  openSheet({
+    className: 'sheet-compact',
+    render: () => `
+      <header class="sheet-header"><button class="link-btn" data-e="cancel">Отмена</button><strong>Сдвиг месяца</strong><button class="link-btn strong" data-e="save">Готово</button></header>
+      <div class="sheet-body">
+        <div class="card pad">
+          <div class="form-grid">
+            <label><span>Месяц</span>${monthSelect('data-e="m"', f.m)}</label>
+            <label><span>Год (хиджра)</span><input class="field" type="number" inputmode="numeric" data-e="y" value="${f.y}"></label>
+          </div>
+          <div class="mt">${segmented('hoff', [-2, -1, 1, 2].map((v) => ({ value: String(v), label: `${v > 0 ? '+' : ''}${v} ${plural(Math.abs(v), DAY_FORMS)}` })), String(f.offset))}</div>
+          <p class="hint">По объявлению УМУ (наблюдение луны). +1 — месяц начался на день позже расчётного.</p>
+          ${offsetWarning(f)}
+        </div>
+      </div>`,
+    mount: (api) => {
+      const q = (k) => api.el.querySelector(`[data-e=${k}]`);
+      q('cancel').onclick = () => api.close();
+      q('m').onchange = (e) => (f.m = Number(e.target.value));
+      q('y').onchange = (e) => (f.y = Number(e.target.value) || f.y);
+      api.el.querySelectorAll('[data-seg=hoff] button').forEach((b) => (b.onclick = () => ((f.offset = Number(b.dataset.value)), api.refresh())));
+      q('save').onclick = () => {
+        const offset = clamp(f.offset, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX);
+        update((d) => {
+          const list = (d.settings.hijri?.offsets || []).filter((o) => !(o.y === f.y && o.m === f.m));
+          if (offset) list.push({ y: f.y, m: f.m, offset });
+          d.settings.hijri = { ...(d.settings.hijri || {}), offsets: list };
+          d.settings.updatedAt = Date.now();
+        });
+        api.close();
+        toast(`${HIJRI_MONTHS[f.m - 1]} ${f.y}: сдвиг ${offset > 0 ? '+' : ''}${offset}`);
+      };
+    },
+  });
+}
+
+/** Предупредить, если со сдвигом месяц получится не 29–30 дней (вероятно, сдвиг не тот). */
+function offsetWarning(f) {
+  const st = getData().settings;
+  const others = (st.hijri?.offsets || []).filter((o) => !(o.y === f.y && o.m === f.m));
+  const test = { ...st, hijri: { offsets: [...others, { y: f.y, m: f.m, offset: f.offset }] } };
+  const py = f.m === 1 ? f.y - 1 : f.y;
+  const pm = f.m === 1 ? 12 : f.m - 1;
+  const bad = [[py, pm], [f.y, f.m]].map(([y, m]) => [y, m, monthLength(y, m, test)]).filter(([, , n]) => n < 29 || n > 30);
+  return bad.length ? `<p class="calib-warn">⚠ Тогда ${bad.map(([y, m, n]) => `${HIJRI_MONTHS[m - 1]} ${y} будет ${n} ${plural(n, DAY_FORMS)}`).join(', ')} — проверь объявление.</p>` : '';
+}
+
+function mountHijri() {
+  const add = view.querySelector('[data-hoff-add]');
+  if (add) add.onclick = () => openHijriOffsetEditor();
+  view.querySelectorAll('[data-hoff-del]').forEach((b) => (b.onclick = () => {
+    const [y, m] = b.dataset.hoffDel.split('-').map(Number);
+    update((d) => {
+      d.settings.hijri = { ...(d.settings.hijri || {}), offsets: (d.settings.hijri?.offsets || []).filter((o) => !(o.y === y && o.m === m)) };
+      d.settings.updatedAt = Date.now();
+    });
+  }));
 }
 
 // ---------- Сверка времени намаза с расписанием ----------
@@ -1690,6 +1854,7 @@ function mountPrefs() {
     setSetting(`prayer.adj.${k}`, (getData().settings.prayer.adj?.[k] || 0) + Number(b.dataset.delta));
   }));
   mountCalibration();
+  mountHijri();
   view.querySelectorAll('[data-seg=asr] button').forEach((b) => (b.onclick = () => setSetting('prayer.asr', b.dataset.value)));
   const calc = view.querySelector('#qada-calc');
   if (calc) calc.onclick = () => {
