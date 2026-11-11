@@ -10,13 +10,14 @@ import * as tg from './tg.js';
 import { WORKER_URL } from './config.js';
 import {
   goalOf, valueOf, progressOf, isDone, isScheduled, firstDay, doneInWeek, scheduleText, goalText,
-  currentStreak, bestStreak, streakText, rateOf, strengthOf, strengthTrend, totalCompletions, dayStats, rangeRate,
+  currentStreak, bestStreak, streakText, rateOf, strengthOf, strengthTrend, forbiddenAt, qadaQueue, tartibHint, tartibCount, totalCompletions, dayStats, rangeRate,
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
+import { forbiddenWindows } from './logic.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -397,10 +398,45 @@ function choiceSheet({ title, message = '', options }) {
   });
 }
 
+/** Восполнение в запретное время: подсказка и подтверждение (не блокирует). */
+function guardForbidden(action) {
+  const w = forbiddenAt(new Date(), getData().settings);
+  if (!w) return action();
+  confirmSheet({
+    title: 'Сейчас запретное время',
+    message: `Время ${w.name}а — восполнить лучше после ${w.until}. Если время рассчитано неточно, можно отметить сейчас.`,
+    confirm: 'Всё равно отметить',
+    onConfirm: action,
+  });
+}
+
+/** Отметить долг (восполнение) из очереди: по трекеру — этап дня с k='qada', иначе старый долг. */
+function repayItem(it, ts = Date.now()) {
+  if (it.old) addEvent(QADA_LOG, todayKey(), 1, it.p, ts, 'qada');
+  else setStageLog(it.hid, it.day, it.sid, 1, 'qada', ts);
+}
+
+function tartibSheet(hint, h, date, s, { undo }) {
+  const it = hint.item;
+  const what = it.old ? `${QADA_NAMES[it.p]} (старый долг)` : `${QADA_NAMES[it.p]} от ${fmtDateShort(parseKey(it.day))}`;
+  const cur = s.juma ? 'Джума' : s.name;
+  choiceSheet({
+    title: `Сначала восполни ${what}`,
+    message: `Затем читай ${cur}. Это подсказка: порядок восполнения (тартиб) включён в Настройках → Каза.`,
+    options: [
+      { label: 'Восполнил сначала', primary: true, run: () => guardForbidden(() => {
+        repayItem(it, Date.now() - 1000); // долг — раньше текущего намаза
+        markStage(h, date, s, { undo, skipTartib: true });
+      }) },
+      { label: `Отметить только ${cur}`, run: () => markStage(h, date, s, { undo, skipTartib: true }) },
+    ],
+  });
+}
+
 const GENITIVE = { fajr: 'Фаджра', dhuhr: 'Зухра', asr: 'Асра', maghrib: 'Магриба', isha: 'Иши', vitr: 'Витра', juma: 'Джума' };
 
 /** Отметить этап; для намаза — с вопросами про каза и Джума. */
-function markStage(h, date, s, { undo = true } = {}) {
+function markStage(h, date, s, { undo = true, skipTartib = false } = {}) {
   const key = dkey(date);
   const cur = getStageLog(h.id, key, s.id);
   const done = (k, label) => {
@@ -416,13 +452,18 @@ function markStage(h, date, s, { undo = true } = {}) {
     return toast(`Время ${GENITIVE[s.juma ? 'juma' : prayerKeyOf(s)] || 'намаза'} ещё не наступило — ${when}`);
   }
   const expired = isPrayer && stageExpired(date, s);
+  // тартиб: при отметке намаза вовремя — мягкая подсказка, что сначала восполнить
+  if (isPrayer && !expired && !skipTartib) {
+    const hint = tartibHint(qadaDebt(), getData().settings, { day: key, sid: s.id });
+    if (hint) return tartibSheet(hint, h, date, s, { undo });
+  }
   if (expired) {
     const name = s.juma ? 'Джума' : s.name;
     return choiceSheet({
       title: `${name} — время вышло`,
       message: `Время ${s.juma ? 'Зухра' : 'намаза'} закончилось в ${fmtMin(s.end)}${dkey(date) !== todayKey() ? ` (${fmtDateShort(date)})` : ''}. Как отметить?`,
       options: [
-        { label: '🕰️ Каза — восполняю', primary: true, run: () => done('qada', `${s.juma ? 'Зухр' : name}: каза засчитан`) },
+        { label: '🕰️ Каза — восполняю', primary: true, run: () => guardForbidden(() => done('qada', `${s.juma ? 'Зухр' : name}: каза засчитан`)) },
         { label: 'Читал вовремя, просто не отметил', run: () => done('late', `${name} отмечен`) },
       ],
     });
@@ -513,7 +554,7 @@ function stagedCard(h, day) {
   }
   if (isNamazHabit(h) && dkey(day) === todayKey()) {
     const debt = qadaDebt().total;
-    if (debt) sub.push(`<span class="debt">каза ${debt}</span>`);
+    if (debt) sub.push(`<span class="debt">долг ${debt}</span>`);
   }
   void ctx;
 
@@ -694,7 +735,7 @@ function openHabitDetail(id) {
           if (s) markStage(h, state.day, s, { undo: false });
         }
       }));
-      api.el.querySelectorAll('[data-repay]').forEach((b) => (b.onclick = () => repayQada(b.dataset.repay)));
+      mountQadaCard(api.el);
       q('archive').onclick = () => {
         upsertHabit({ id, archived: !h.archived });
         if (!h.archived) {
@@ -734,7 +775,7 @@ function stageEditor(h, day) {
       ontime: `${kindLabel}отмечено в ${at}`,
       late: `${kindLabel}вовремя, отмечено в ${at}`,
       qada: `каза · восполнено в ${at}`,
-      missed: h.ibadah ? `не отмечено (${window_}) · можно восполнить` : `пропущен (${window_}) · долг каза`,
+      missed: `не отмечено (${window_}) · долг, можно восполнить`,
     }[status] || (ok && at ? `отмечено в ${at}` : window_);
     const range = s.max && s.max !== s.min ? `${s.min}–${s.max}` : `${s.min}`;
     const control = h.type === 'count'
@@ -747,39 +788,80 @@ function stageEditor(h, day) {
 // ---------- Каза ----------
 
 function repayQada(p) {
-  const debt = qadaDebt();
-  const b = debt.byPrayer[p];
+  const b = qadaDebt().byPrayer[p];
   if (!b || !b.total) return;
-  haptic(20);
-  if (b.missed.length) {
-    // сначала закрываем самый старый пропуск по трекеру
-    const m = b.missed[0];
-    setStageLog(m.hid, m.day, m.sid, 1, 'qada');
-    return toast(`${QADA_NAMES[p]} за ${fmtDateShort(parseKey(m.day))}: каза засчитан`, { action: 'Отменить', onAction: () => setStageLog(m.hid, m.day, m.sid, 0) });
-  }
-  addEvent(QADA_LOG, todayKey(), 1, p, Date.now(), 'qada');
-  toast(`${QADA_NAMES[p]}: −1 из старого долга`, { action: 'Отменить', onAction: () => addEvent(QADA_LOG, todayKey(), -1, p) });
+  // сначала самый старый пропуск по трекеру, затем старый долг
+  const it = b.missed.length ? { ...b.missed[0], p } : { p, old: true };
+  guardForbidden(() => doRepay(it));
 }
 
+function doRepay(it) {
+  haptic(20);
+  repayItem(it);
+  if (it.old) return toast(`${QADA_NAMES[it.p]}: −1 из старого долга`, { action: 'Отменить', onAction: () => addEvent(QADA_LOG, todayKey(), -1, it.p) });
+  toast(`${QADA_NAMES[it.p]} за ${fmtDateShort(parseKey(it.day))}: восполнено`, { action: 'Отменить', onAction: () => setStageLog(it.hid, it.day, it.sid, 0) });
+}
+
+function repayNext() {
+  const q = qadaQueue(qadaDebt());
+  if (q[0]) guardForbidden(() => doRepay(q[0]));
+}
+
+const TARTIB_ASK = 'Есть ли у тебя старые пропущенные намазы? Если нет и пропусков меньше шести — порядок восполнения обязателен по ханафитскому мазхабу, уточни у имама.';
+
 function qadaCard() {
+  const st = getData().settings;
   const d = qadaDebt();
   const goal = d.perDay;
-  const rows = QADA_KEYS.filter((k) => d.byPrayer[k].total).map((k) => {
-    const b = d.byPrayer[k];
-    const parts = [];
-    if (b.missed.length) parts.push(`по трекеру ${b.missed.length}`);
-    if (b.oldLeft) parts.push(`старый долг ${b.oldLeft}`);
-    return `<div class="row static"><div class="row-main"><b>${QADA_NAMES[k]} · ${b.total}</b><span class="muted">${parts.join(' · ')}</span></div><button class="pill qada-pill" data-repay="${k}">+ Восполнил</button></div>`;
-  }).join('');
+  const tartib = st.tartib || {};
+  const fw = forbiddenAt(new Date(), st);
+  const forbidHint = fw && d.total ? `<p class="hint forbid-hint">Сейчас запретное время (${fw.name}) — восполнить после ${fw.until}.</p>` : '';
+  const ask = !tartib.asked ? `<div class="card pad tartib-ask"><p>${TARTIB_ASK}</p><div class="calib-actions"><button class="btn btn-primary" data-tartib-ask="on">Включить порядок</button><button class="btn btn-secondary" data-tartib-ask="off">Не сейчас</button></div></div>` : '';
+  const typeLabel = (k) => (d.byPrayer[k].type === 'wajib' ? ' · ваджиб' : '');
+  let body = '';
+  if (tartib.enabled) {
+    const queue = qadaQueue(d);
+    const n = tartibCount(d, st);
+    const active = n > 0 && n < (Number(tartib.limit) || 6);
+    const list = queue.slice(0, 8).map((it, i) => `<div class="row static"><span class="queue-n">${i + 1}</span><div class="row-main"><b>${QADA_NAMES[it.p]}${typeLabel(it.p)}</b><span class="muted">${fmtDateShort(parseKey(it.day))}</span></div></div>`).join('');
+    const old = QADA_KEYS.filter((k) => d.byPrayer[k].oldLeft).map((k) => `<div class="row static"><div class="row-main"><b>${QADA_NAMES[k]}${typeLabel(k)} · ${d.byPrayer[k].oldLeft}</b><span class="muted">старый долг</span></div><button class="pill qada-pill" data-repay-old="${k}">+ Восполнил</button></div>`).join('');
+    body = `${queue.length ? `<div class="card list-group"><div class="row static"><div class="row-main"><b>Порядок восполнения</b><span class="muted">${active ? 'тартиб: сначала самый ранний долг' : `долгов ${n} — порядок не обязателен (порог ${Number(tartib.limit) || 6})`}</span></div></div>${list}${queue.length > 8 ? `<div class="row static"><span class="muted">и ещё ${queue.length - 8}</span></div>` : ''}</div>
+      <button class="btn btn-block btn-primary mt" data-repay-next>Восполнить: ${QADA_NAMES[queue[0].p]} · ${fmtDateShort(parseKey(queue[0].day))}</button>` : ''}
+      ${old ? `<div class="card list-group mt">${old}</div>` : ''}`;
+  } else {
+    const rows = QADA_KEYS.filter((k) => d.byPrayer[k].total).map((k) => {
+      const b = d.byPrayer[k];
+      const parts = [];
+      if (b.missed.length) parts.push(`по трекеру ${b.missed.length}`);
+      if (b.oldLeft) parts.push(`старый долг ${b.oldLeft}`);
+      return `<div class="row static"><div class="row-main"><b>${QADA_NAMES[k]}${typeLabel(k)} · ${b.total}</b><span class="muted">${parts.join(' · ')}</span></div><button class="pill qada-pill" data-repay="${k}">+ Восполнил</button></div>`;
+    }).join('');
+    body = `<div class="card list-group">${rows}</div>`;
+  }
   let forecast = '';
   if (d.oldLeft && goal) {
     const days = Math.ceil(d.oldLeft / goal);
     forecast = `При ${goal} в день старый долг будет восполнен примерно к ${fmtDateShort(addDays(today(), days))} (${days} ${plural(days, DAY_FORMS)}).`;
   }
-  return `<div class="group-title">Каза${d.total ? ` · долг ${d.total}` : ''}</div>
-    ${d.total ? `<div class="card list-group">${rows}</div>` : `<div class="card pad"><p class="hint first center">Долгов каза нет — ма шаа Аллах 🤲</p></div>`}
+  const head = d.total ? ` · долг ${d.total}${d.totalWajib ? ` (фард ${d.totalFard}, ваджиб ${d.totalWajib})` : ''}` : '';
+  return `<div class="group-title">Каза${head}</div>
+    ${ask}
+    ${d.total ? `${forbidHint}${body}` : `<div class="card pad"><p class="hint first center">Долгов нет — ма шаа Аллах 🤲</p></div>`}
     ${goal && d.oldLeft ? `<div class="card pad qada-goal"><div class="milestone-row"><span>Сегодня восполнено</span><span><b>${d.repaidToday}</b> из ${goal}</span></div><div class="progress" style="--c:var(--orange)"><div style="width:${Math.min(100, Math.round((d.repaidToday / goal) * 100))}%"></div></div>${forecast ? `<p class="hint">${forecast}</p>` : ''}</div>` : ''}
-    <p class="hint">Пропущенные по трекеру намазы появляются здесь автоматически. Старые долги и цель в день — в Настройках → Время намаза.</p>`;
+    <p class="hint">Намазы, не отмеченные вовремя, появляются здесь автоматически. Старые долги, цель в день, запретное время и порядок восполнения — в Настройках → Время намаза.</p>`;
+}
+
+function mountQadaCard(el) {
+  el.querySelectorAll('[data-repay]').forEach((b) => (b.onclick = () => repayQada(b.dataset.repay)));
+  el.querySelectorAll('[data-repay-old]').forEach((b) => (b.onclick = () => guardForbidden(() => doRepay({ p: b.dataset.repayOld, old: true }))));
+  const next = el.querySelector('[data-repay-next]');
+  if (next) next.onclick = () => repayNext();
+  el.querySelectorAll('[data-tartib-ask]').forEach((b) => (b.onclick = () => {
+    update((d) => {
+      d.settings.tartib = { ...(d.settings.tartib || {}), asked: true, ...(b.dataset.tartibAsk === 'on' ? { enabled: true } : {}) };
+      d.settings.updatedAt = Date.now();
+    });
+  }));
 }
 
 function namazStatsCard(h) {
@@ -791,7 +873,7 @@ function namazStatsCard(h) {
     <div class="tiles">
       <div class="tile"><div class="tile-label">Вовремя</div><div class="tile-val" style="color:var(--green)">${pctOf(s.ontime + s.late)}</div></div>
       <div class="tile"><div class="tile-label">Каза</div><div class="tile-val" style="color:var(--orange)">${s.qada}</div></div>
-      <div class="tile"><div class="tile-label">${h.ibadah ? 'Не отмечено' : 'Пропущено'}</div><div class="tile-val" style="color:${s.missed && !h.ibadah ? 'var(--red)' : 'inherit'}">${s.missed}</div></div>
+      <div class="tile"><div class="tile-label">Не отмечено</div><div class="tile-val">${s.missed}</div></div>
       <div class="tile"><div class="tile-label">Джума</div><div class="tile-val">${s.juma}<small> из ${s.fridays}</small></div></div>
     </div>
     ${s.late ? `<p class="hint">Отмечено с опозданием (но прочитано вовремя): ${s.late}.</p>` : ''}`;
@@ -1824,7 +1906,8 @@ function jumaSection() {
 }
 
 function qadaSettingsSection() {
-  const q = getData().settings.qada;
+  const st = getData().settings;
+  const q = st.qada;
   const d = qadaDebt();
   return `
     <div class="group-title">Старые долги каза</div>
@@ -1838,7 +1921,24 @@ function qadaSettingsSection() {
       <div class="qada-grid">${QADA_KEYS.map((k) => `<label><span>${QADA_NAMES[k]}</span><input class="field" type="number" min="0" inputmode="numeric" data-set="qada.old.${k}" data-num value="${Number(q.old?.[k]) || 0}"></label>`).join('')}</div>
       <label class="switch-row mt"><span>Цель: восполнять в день</span>
         <select class="field compact" data-set="qada.perDay" data-num>${[0, 1, 2, 3, 4, 5, 6, 10].map((n) => `<option value="${n}" ${Number(q.perDay) === n ? 'selected' : ''}>${n ? `${n} ${plural(n, ['намаз', 'намаза', 'намазов'])}` : 'без цели'}</option>`).join('')}</select></label>
-      <p class="hint">Калькулятор считает по одному намазу каждого вида за каждый день (включая Витр), дальше любое число можно поправить. Осталось восполнить из старого долга: <b>${d.oldLeft}</b>.</p>
+      <p class="hint">Калькулятор считает по одному намазу каждого вида за каждый день, включая Витр (ваджиб), дальше любое число можно поправить. Осталось восполнить из старого долга: <b>${d.oldLeft}</b>.</p>
+    </div>
+    <div class="group-title">Запретное время</div>
+    <div class="card pad">
+      <div class="form-grid three">
+        <label><span>После восхода</span><input class="field" type="number" min="0" max="60" inputmode="numeric" data-set="forbidden.sunrise" data-num value="${Number(st.forbidden?.sunrise) || 0}"></label>
+        <label><span>До Зухра</span><input class="field" type="number" min="0" max="60" inputmode="numeric" data-set="forbidden.zenith" data-num value="${Number(st.forbidden?.zenith) || 0}"></label>
+        <label><span>До Магриба</span><input class="field" type="number" min="0" max="60" inputmode="numeric" data-set="forbidden.sunset" data-num value="${Number(st.forbidden?.sunset) || 0}"></label>
+      </div>
+      <p class="hint">Минуты, когда приложение не предлагает восполнять каза. Сверь у имама. Сегодня: ${forbiddenWindows(today(), st).map((w) => `${w.name} ${fmtMin(w.from)}–${w.until}`).join(', ')}.</p>
+    </div>
+    <div class="group-title">Порядок восполнения</div>
+    <div class="card pad">
+      <label class="switch-row"><span><b>Соблюдать порядок (сахиб ат-тартиб)</b><br><span class="muted small">Включай после консультации с имамом</span></span><input type="checkbox" class="switch" data-set-bool="tartib.enabled" ${st.tartib?.enabled ? 'checked' : ''}></label>
+      ${st.tartib?.enabled ? `
+      <label class="switch-row mt"><span>Учитывать старые долги<br><span class="muted small">Из калькулятора выше</span></span><input type="checkbox" class="switch" data-set-bool="tartib.countOld" ${st.tartib?.countOld ? 'checked' : ''}></label>
+      <label class="switch-row mt"><span>Учитывать Витр</span><input type="checkbox" class="switch" data-set-bool="tartib.countVitr" ${st.tartib?.countVitr !== false ? 'checked' : ''}></label>
+      <p class="hint">Пока долгов меньше ${Number(st.tartib?.limit) || 6}, при отметке намаза приложение подскажет сначала восполнить самый ранний. Ничего не блокируется.</p>` : ''}
     </div>`;
 }
 
@@ -1983,6 +2083,7 @@ sync.onStatus(() => {
 function migrateNamaz() {
   const tk = todayKey();
   if (!getData().settings.qada?.since) setSetting('qada.since', tk);
+  if (!getData().settings.qada?.vitrSince) setSetting('qada.vitrSince', tk);
   for (const h of habitsActive().filter(isNamazHabit)) {
     if (h.stages.some((x) => x.role === 'vitr')) continue;
     upsertHabit({ id: h.id, stages: [...h.stages, { ...VITR_STAGE(), since: tk }] });

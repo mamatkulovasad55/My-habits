@@ -259,13 +259,17 @@ export function stageStatus(h, date, s, now = new Date()) {
     return m?.k === 'qada' ? 'qada' : m?.k === 'late' ? 'late' : 'ontime';
   }
   if (!stageExpired(date, s, now)) return 'pending';
-  const since = getData().settings.qada?.since;
+  const q = getData().settings.qada || {};
+  // Витр становится долгом (ваджиб) только с vitrSince — прошлые неотмеченные Витры не превращаются в долг
+  const since = prayerKeyOf(s) === 'vitr' && q.vitrSince && q.vitrSince > (q.since || '') ? q.vitrSince : q.since;
   if (!since || key < since || !prayerKeyOf(s)) return 'untracked';
   return 'missed';
 }
 
 export const QADA_KEYS = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha', 'vitr'];
 export const QADA_NAMES = { fajr: 'Фаджр', dhuhr: 'Зухр', asr: 'Аср', maghrib: 'Магриб', isha: 'Иша', vitr: 'Витр' };
+/** Тип долга: Витр — ваджиб, остальные — фард. */
+export const QADA_TYPE = { fajr: 'fard', dhuhr: 'fard', asr: 'fard', maghrib: 'fard', isha: 'fard', vitr: 'wajib' };
 
 /**
  * Долг каза по каждому намазу.
@@ -277,7 +281,7 @@ export function qadaDebt(dateArg, minArg) {
   const q = data.settings.qada || {};
   const now = dateArg ? new Date(dateArg.getFullYear(), dateArg.getMonth(), dateArg.getDate(), 0, minArg ?? 0) : new Date();
   const t = startOfDay(now);
-  const byPrayer = Object.fromEntries(QADA_KEYS.map((k) => [k, { missed: [], oldLeft: 0, total: 0 }]));
+  const byPrayer = Object.fromEntries(QADA_KEYS.map((k) => [k, { missed: [], oldLeft: 0, total: 0, type: QADA_TYPE[k] }]));
   if (q.since) {
     for (const h of habitsActive().filter(isNamazHabit)) {
       let d = parseKey(q.since);
@@ -311,14 +315,18 @@ export function qadaDebt(dateArg, minArg) {
   }
   let total = 0;
   let oldLeft = 0;
+  let totalFard = 0;
+  let totalWajib = 0;
   for (const k of QADA_KEYS) {
     const b = byPrayer[k];
     b.oldLeft = Math.max(0, (Number(q.old?.[k]) || 0) - repaid[k]);
     b.total = b.missed.length + b.oldLeft;
     total += b.total;
     oldLeft += b.oldLeft;
+    if (b.type === 'wajib') totalWajib += b.total;
+    else totalFard += b.total;
   }
-  return { total, oldLeft, byPrayer, repaidToday, perDay: Math.max(0, Number(q.perDay) || 0) };
+  return { total, totalFard, totalWajib, oldLeft, byPrayer, repaidToday, perDay: Math.max(0, Number(q.perDay) || 0) };
 }
 
 /** Итоги намазов за n дней: вовремя / отмечено поздно / каза / пропущено, Джума. */

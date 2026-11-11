@@ -310,10 +310,28 @@ function localNow(tz) {
   return { date: new Date(+parts.year, +parts.month - 1, +parts.day), min: (+parts.hour % 24) * 60 + +parts.minute };
 }
 
+/**
+ * Пользователи, которым cron рассылает напоминания. Сейчас — один владелец (owner в KV, data.json из DATA_PATH).
+ * Заготовка под нескольких пользователей: хранение не меняется, но рассылка уже идёт циклом.
+ */
+async function listUsers(env) {
+  const owner = await getOwner(env);
+  return owner ? [{ chatId: owner, dataPath: env.DATA_PATH || 'data.json' }] : [];
+}
+
 async function tick(env) {
   if (!env.DATA_TOKEN || !env.DATA_OWNER || !env.BOT_TOKEN) return;
-  const owner = await getOwner(env);
-  if (!owner) return;
+  for (const user of await listUsers(env)) {
+    try {
+      await tickUser(env, user);
+    } catch (e) {
+      console.error('tick failed for user', e?.message); // ошибка одного не мешает остальным
+    }
+  }
+}
+
+async function tickUser(env, user) {
+  const owner = user.chatId;
   const remote = await getRemoteRaw(env);
   if (!remote) return;
   replaceData(remote.data);

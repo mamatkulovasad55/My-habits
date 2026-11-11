@@ -1122,11 +1122,11 @@ body.is-gate .tabbar { display: none; }
 
 /* ---------- Каза, Джума ---------- */
 .stage-dots i.is-qada { background: var(--orange); }
-.stage-dots i.is-missed { background: var(--red); opacity: 0.85; }
-.hsub .debt { color: var(--red); font-weight: 600; }
+.stage-dots i.is-missed { background: var(--label-3); opacity: 1; }
+.hsub .debt { color: var(--label-2); font-weight: 600; }
 .stage-row.st-qada .row-main .muted { color: var(--orange); }
-.stage-row.st-missed .row-main b { color: var(--red); }
-.stage-row.st-missed .row-main .muted { color: var(--red); opacity: 0.85; }
+.stage-row.st-missed .row-main b { color: inherit; }
+.stage-row.st-missed .row-main .muted { color: var(--label-2); }
 .qada-pill { --c: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); color: var(--orange); white-space: nowrap; }
 .qada-goal .progress > div { background: var(--orange); }
 .calc { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; color: var(--label-2); }
@@ -1151,3 +1151,10 @@ body.is-gate .tabbar { display: none; }
 .chips.hijri-days { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 .chips.hijri-days .chip { min-width: 0; padding: 8px 0; text-align: center; }
 .segmented[data-seg="sched"] { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+
+/* Каза: тартиб, запретное время */
+.queue-n { width: 24px; height: 24px; border-radius: 50%; background: var(--fill); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex: none; }
+.forbid-hint { margin: 0 4px 10px; color: var(--orange); }
+.tartib-ask { margin-bottom: 10px; }
+.tartib-ask p { margin: 0; line-height: 1.4; }
+.form-grid.three { grid-template-columns: 1fr 1fr 1fr; }

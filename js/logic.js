@@ -1,6 +1,8 @@
 // Бизнес-логика: расписания, серии, проценты, воздержание, достижения.
 import { getData, getLog, getStageLog, getEvents, habitsActive, habitsAll, abstainAll, subscribe } from './store.js';
 import { isHijriScheduled, hijriRuleText } from './hijri.js';
+import { timesFor } from './calibrate.js';
+import { fmtMin } from './prayer.js';
 import { addDays, dkey, parseKey, startOfDay, startOfWeek, today, plural, DAY_FORMS, TIMES_FORMS, WEEKDAYS_SHORT } from './util.js';
 
 const DAY = 86400000;
@@ -249,6 +251,77 @@ function computeStrength(h, until) {
 
 /** Изменение силы за последние 30 дней. */
 export const strengthTrend = (h) => strengthOf(h) - strengthOf(h, addDays(today(), -30));
+
+// ================= Запретное время и тартиб (чистые функции) =================
+
+/** Значения по умолчанию; у пользователя они в settings.forbidden / settings.tartib. */
+export const FORBIDDEN_DEFAULTS = { sunrise: 15, zenith: 10, sunset: 15 };
+export const TARTIB_LIMIT = 6;
+export const TARTIB_COUNT_VITR = true;
+const FORBIDDEN_NAMES = { sunrise: 'восход', zenith: 'зенит', sunset: 'закат' };
+
+/** Окна запретного времени дня (минуты от полуночи): восход, зенит, закат — по сверенному времени намаза. */
+export function forbiddenWindows(date, settings) {
+  const n = { ...FORBIDDEN_DEFAULTS, ...(settings?.forbidden || {}) };
+  const t = timesFor(keyOf(date), settings, settings?.prayer?.adj || {});
+  const w = [
+    { key: 'sunrise', from: t.sunrise, to: t.sunrise + (Number(n.sunrise) || 0) },
+    { key: 'zenith', from: t.dhuhr - (Number(n.zenith) || 0), to: t.dhuhr },
+    { key: 'sunset', from: t.maghrib - (Number(n.sunset) || 0), to: t.maghrib },
+  ];
+  return w.filter((x) => x.to > x.from).map((x) => ({ ...x, name: FORBIDDEN_NAMES[x.key], until: fmtMin(x.to) }));
+}
+
+/** Окно запретного времени, в которое попадает момент datetime, или null. */
+export function forbiddenAt(datetime, settings) {
+  const day = new Date(datetime.getFullYear(), datetime.getMonth(), datetime.getDate());
+  const min = datetime.getHours() * 60 + datetime.getMinutes();
+  return forbiddenWindows(day, settings).find((x) => min >= x.from && min < x.to) || null;
+}
+
+const QADA_ORDER = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha', 'vitr'];
+
+/** Хронологическая очередь невосполненных долгов по трекеру: по дню, затем по порядку намазов (Витр после Иши). */
+export function qadaQueue(debt) {
+  const out = [];
+  for (const p of QADA_ORDER) for (const m of debt?.byPrayer?.[p]?.missed || []) out.push({ ...m, p });
+  return out.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : QADA_ORDER.indexOf(a.p) - QADA_ORDER.indexOf(b.p)));
+}
+
+const tartibOf = (settings) => ({ enabled: false, limit: TARTIB_LIMIT, countOld: false, countVitr: TARTIB_COUNT_VITR, ...(settings?.tartib || {}) });
+
+/** Число долгов, по которому решается, действует ли порядок восполнения. */
+export function tartibCount(debt, settings) {
+  const t = tartibOf(settings);
+  let n = 0;
+  for (const p of QADA_ORDER) {
+    if (p === 'vitr' && !t.countVitr) continue;
+    const b = debt?.byPrayer?.[p];
+    if (!b) continue;
+    n += b.missed.length + (t.countOld ? b.oldLeft : 0);
+  }
+  return n;
+}
+
+/**
+ * Подсказка тартиба при отметке намаза target ({ day, sid }): что восполнить сначала.
+ * null — если тартиб выключен, долгов нет или их не меньше порога, либо target и есть первый долг.
+ */
+export function tartibHint(debt, settings, target) {
+  const t = tartibOf(settings);
+  if (!t.enabled) return null;
+  const count = tartibCount(debt, settings);
+  if (!count || count >= (Number(t.limit) || TARTIB_LIMIT)) return null;
+  const queue = qadaQueue(debt).filter((x) => t.countVitr || x.p !== 'vitr');
+  let first = queue[0];
+  if (!first && t.countOld) {
+    const p = QADA_ORDER.find((k) => (k !== 'vitr' || t.countVitr) && debt.byPrayer[k]?.oldLeft > 0);
+    if (p) first = { p, old: true };
+  }
+  if (!first) return null;
+  if (target && first.day === target.day && first.sid === target.sid) return null;
+  return { item: first, count };
+}
 
 export function totalCompletions(h) {
   const logs = getData().logs[h.id] || {};
