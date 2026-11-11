@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
@@ -17,6 +17,7 @@ const ASSETS = [
   './js/tg.js',
   './js/config.js',
   './js/migrate.js',
+  './js/calibrate.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/apple-touch-icon.png',
