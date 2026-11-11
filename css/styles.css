@@ -1158,3 +1158,36 @@ body.is-gate .tabbar { display: none; }
 .tartib-ask { margin-bottom: 10px; }
 .tartib-ask p { margin: 0; line-height: 1.4; }
 .form-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+
+/* ---------- Счётчик зикров ---------- */
+.dhikr-btn { font-size: 20px; }
+.sheet.sheet-full { max-width: 560px; height: calc(100dvh - var(--safe-t) - 12px); max-height: none; }
+.dhikr-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 0 16px calc(var(--safe-b) + 14px); }
+.dhikr-tabs .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.dhikr-tabs .segmented button { font-size: 13px; }
+.dhikr-text { text-align: center; padding: 6px 4px 0; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.dhikr-ar { font-family: 'Amiri', 'Noto Naskh Arabic', 'Geeza Pro', 'Noto Sans Arabic', serif; font-size: clamp(30px, 9vw, 42px); line-height: 1.7; color: var(--green); }
+.dhikr-tr { margin-top: 4px; font-size: 17px; font-weight: 600; }
+.dhikr-ru { margin-top: 4px; font-size: 15px; color: var(--label-2); line-height: 1.35; }
+.dhikr-pad {
+  flex: 1; min-height: 180px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border-radius: var(--radius); background: var(--sheet-card);
+  position: relative; cursor: pointer;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.dhikr-pad.is-tap { animation: dhikr-tap 0.1s ease-out; }
+@keyframes dhikr-tap { from { transform: scale(0.985); } to { transform: none; } }
+.dhikr-goal { position: absolute; top: 14px; left: 16px; right: 16px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--label-2); font-variant-numeric: tabular-nums; }
+.dhikr-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.dhikr-bar > div { height: 100%; width: 0; background: var(--green); transition: width 0.1s linear; }
+.dhikr-goal.is-done span { color: var(--green); font-weight: 600; }
+.dhikr-count { font-size: clamp(72px, 26vw, 120px); font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.dhikr-today { position: absolute; bottom: 14px; font-size: 13px; color: var(--label-2); }
+.dhikr-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.dhikr-stats { padding-top: 10px; padding-bottom: 10px; }
+.dhikr-row { display: grid; grid-template-columns: minmax(0, 1.6fr) 1fr 1fr 1fr; gap: 8px; padding: 7px 0; font-variant-numeric: tabular-nums; }
+.dhikr-row > span { text-align: right; }
+.dhikr-row + .dhikr-row { border-top: 0.5px solid var(--sep); }
+.dhikr-row.th { font-size: 12px; color: var(--label-2); text-transform: uppercase; }
+.dhikr-row.total b, .dhikr-row.total span { font-weight: 600; }
