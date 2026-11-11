@@ -18,7 +18,7 @@ import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHo
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
 import { forbiddenWindows } from './logic.js';
-import { createCounter, recoverPending, dhikrTotals, dhikrSums, DHIKR_TARGETS } from './dhikr.js';
+import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS } from './dhikr.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -2214,6 +2214,49 @@ function commitDhikr() {
 document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && commitDhikr());
 window.addEventListener('pagehide', commitDhikr);
 
+// Навигация: главный экран (разделы) → список раздела → счётчик. Каждый уровень — полноэкранная шторка,
+// «Назад» в Telegram и «‹» возвращают на уровень выше, ✕ закрывает все уровни.
+const dhikrSheets = [];
+function closeAllDhikr() {
+  for (const s of [...dhikrSheets].reverse()) s.close();
+}
+function dhikrSheet(opts) {
+  const api = openSheet({
+    ...opts,
+    className: `sheet-full dhikr-sheet ${opts.className || ''}`,
+    swipe: false,
+    onClose: () => {
+      opts.onClose?.();
+      const i = dhikrSheets.indexOf(api);
+      if (i >= 0) dhikrSheets.splice(i, 1);
+    },
+  });
+  dhikrSheets.push(api);
+  return api;
+}
+const dhikrHead = (title, { back = true, right = '' } = {}) => `
+  <header class="sheet-header dhikr-head">
+    ${back ? `<button class="icon-btn sm" data-z="back" aria-label="Назад">${icon.chevronL(20)}</button>` : '<span></span>'}
+    <strong>${title}</strong>
+    <span class="dhikr-head-right">${right}<button class="icon-btn sm" data-z="closeall" aria-label="Закрыть">${icon.close(18)}</button></span>
+  </header>`;
+function mountDhikrHead(a) {
+  const back = a.el.querySelector('[data-z=back]');
+  if (back) back.onclick = () => a.close();
+  a.el.querySelector('[data-z=closeall]').onclick = () => closeAllDhikr();
+}
+const dhikrSettings = () => getData().settings.dhikr || {};
+const isFav = (id) => (dhikrSettings().favorites || []).includes(id);
+function toggleFav(id) {
+  const fav = new Set(dhikrSettings().favorites || []);
+  fav.has(id) ? fav.delete(id) : fav.add(id);
+  setSetting('dhikr.favorites', [...fav]);
+  haptic(10);
+}
+const starBtn = (id) => `<button class="dhikr-star ${isFav(id) ? 'is-on' : ''}" data-fav="${id}" aria-label="${isFav(id) ? 'Убрать из избранного' : 'В избранное'}">${isFav(id) ? '★' : '☆'}</button>`;
+const zWord = (n) => `${n} ${plural(n, ['зикр', 'зикра', 'зикров'])}`;
+
+/** 1. Главный экран: разделы и «Сегодня». */
 async function openDhikr() {
   let list;
   try {
@@ -2221,142 +2264,228 @@ async function openDhikr() {
   } catch {
     return toast('Не удалось загрузить зикры');
   }
-  const st = () => getData().settings.dhikr || {};
-  const startId = list.some((x) => x.id === st().last) ? st().last : list[0].id;
-  const counter = createCounter({ storage: safeStorage(), record: addDhikrRecord, id: startId });
-  dhikrCounter = counter;
-  let reached = false;
-  const cur = () => list.find((x) => x.id === counter.id) || list[0];
-  const todayOf = (id) => (dhikrTotals(getData(), todayKey()).byId[id] || 0) + (counter.id === id ? counter.n : 0);
+  dhikrSheet({
+    live: true,
+    render: () => {
+      const st = getData().settings;
+      const ctx = dayContext(today());
+      const min = nowMin();
+      const tiles = DHIKR_COLLECTIONS.map((c) => {
+        const items = collectionItems(c.id, list, st);
+        const soon = c.soon && !items.length;
+        const sub = soon ? 'Скоро' : c.id === 'favorites' && !items.length ? 'Нет избранных' : zWord(items.length);
+        const now = !soon && collectionIsNow(c, ctx.prayers, min);
+        return `<button class="dhikr-tile tint-${c.tint} ${soon ? 'is-soon' : ''}" data-col="${c.id}" ${soon ? 'aria-disabled="true"' : ''}>
+          ${now ? '<span class="dhikr-now">Сейчас</span>' : ''}
+          <span class="dhikr-tile-icon">${c.icon}</span>
+          <b>${c.title}</b><span>${sub}</span>
+        </button>`;
+      }).join('');
+      const t = dhikrTotals(getData(), todayKey());
+      const last = list.find((x) => x.id === dhikrSettings().last) || list[0];
+      const lt = t.byId[last.id] || 0;
+      const r = roundView(lt, targetFor(last, st));
+      const tgt = targetFor(last, st);
+      return `${dhikrHead('Зикры', { back: false })}
+      <div class="sheet-body dhikr-home">
+        <div class="dhikr-tiles">${tiles}</div>
+        <div class="group-title">Сегодня</div>
+        <div class="dhikr-tiles">
+          <button class="dhikr-tile is-plain" data-continue="${last.id}">
+            ${ring(tgt ? (r.full ? 1 : r.value / tgt) : lt ? 1 : 0, { size: 40, stroke: 4, color: 'var(--green)', key: `dz-${last.id}` })}
+            <b>${esc(last.title)}</b><span>${lt ? `${fmtInt(lt)} сегодня${r.rounds ? ` · ${r.rounds} ${plural(r.rounds, ['круг', 'круга', 'кругов'])}` : ''}` : 'Продолжить'}</span>
+          </button>
+          <div class="dhikr-tile is-plain is-static">
+            <span class="dhikr-total">${fmtInt(t.total)}</span>
+            <b>Всего сегодня</b><span>${t.total ? `${Object.keys(t.byId).length} из ${list.length} зикров` : 'Пока нет'}</span>
+          </div>
+        </div>
+      </div>`;
+    },
+    mount: (a) => {
+      mountDhikrHead(a);
+      a.el.querySelectorAll('[data-col]').forEach((b) => (b.onclick = () => {
+        const c = DHIKR_COLLECTIONS.find((x) => x.id === b.dataset.col);
+        const items = collectionItems(c.id, list, getData().settings);
+        if (c.soon && !items.length) return toast(`${c.title} появятся позже`);
+        if (!items.length) return toast('Отмечай зикры звёздочкой ☆ в списке');
+        openDhikrList(c, list);
+      }));
+      const cont = a.el.querySelector('[data-continue]');
+      if (cont) cont.onclick = () => openDhikrCounter(list, list.findIndex((x) => x.id === cont.dataset.continue));
+    },
+  });
+}
 
-  const api = openSheet({
-    className: 'sheet-full dhikr-sheet',
-    swipe: false,
+/** 2. Список раздела. */
+function openDhikrList(col, list) {
+  dhikrSheet({
+    live: true,
+    render: () => {
+      const st = getData().settings;
+      const items = collectionItems(col.id, list, st);
+      const t = dhikrTotals(getData(), todayKey());
+      const all = dhikrAllTime(getData());
+      const rows = items.map((x, i) => {
+        const tgt = targetFor(x, st);
+        const r = roundView(t.byId[x.id] || 0, tgt);
+        const done = tgt && (t.byId[x.id] || 0) >= tgt;
+        return `<div class="dhikr-item" data-open="${i}" role="button">
+          <div class="dhikr-item-top"><b>${esc(x.title)}</b>${starBtn(x.id)}</div>
+          <div class="dhikr-item-tr">${esc(x.translit)}</div>
+          <div class="dhikr-item-count ${done ? 'is-done' : ''}">${done ? '✓ ' : ''}${fmtInt(r.value)}${tgt ? ` / ${tgt}` : ''}${r.rounds > 1 || (r.rounds === 1 && !r.full) ? ` · ${r.rounds} ${plural(r.rounds, ['круг', 'круга', 'кругов'])}` : ''}<span> · всего ${fmtInt(all[x.id] || 0)}</span></div>
+        </div>`;
+      }).join('');
+      return `${dhikrHead(col.title)}
+      <div class="sheet-body dhikr-list">${rows || '<p class="hint center">Здесь пока пусто</p>'}</div>`;
+    },
+    mount: (a) => {
+      mountDhikrHead(a);
+      a.el.querySelectorAll('[data-fav]').forEach((b) => (b.onclick = (e) => {
+        e.stopPropagation();
+        toggleFav(b.dataset.fav);
+      }));
+      a.el.querySelectorAll('[data-open]').forEach((r) => (r.onclick = () => openDhikrCounter(collectionItems(col.id, list, getData().settings), Number(r.dataset.open))));
+    },
+  });
+}
+
+/** 3. Счётчик зикра; свайп по тексту — следующий/предыдущий в списке. */
+function openDhikrCounter(items, index) {
+  items = [...items];
+  let idx = Math.max(0, index);
+  const counter = createCounter({ storage: safeStorage(), record: addDhikrRecord, id: items[idx].id });
+  dhikrCounter = counter;
+  setSetting('dhikr.last', items[idx].id);
+  const cur = () => items[idx];
+  const tgt = () => targetFor(cur(), getData().settings);
+  const todayOf = (id) => (dhikrTotals(getData(), todayKey()).byId[id] || 0) + (counter.id === id ? counter.n : 0);
+  let lastRounds = 0;
+  let slide = '';
+
+  const api = dhikrSheet({
     onClose: () => {
       counter.commit();
       if (dhikrCounter === counter) dhikrCounter = null;
     },
     render: () => {
       const d = cur();
-      const target = Number(st().target) || 0;
-      return `
-      <header class="sheet-header">
-        <button class="link-btn" data-z="menu" aria-label="Настройки счётчика">•••</button>
-        <strong>Зикр</strong>
-        <button class="icon-btn sm" data-z="close" aria-label="Закрыть">${icon.close(18)}</button>
-      </header>
+      const target = tgt();
+      const dots = items.length > 1 ? `<div class="dhikr-dots">${items.map((_, i) => `<i class="${i === idx ? 'is-on' : ''}"></i>`).join('')}</div>` : '';
+      return `${dhikrHead(`${idx + 1} / ${items.length}`, { right: `${starBtn(d.id)}<button class="icon-btn sm" data-z="menu" aria-label="Настройки">•••</button>` })}
       <div class="dhikr-body">
-        <div class="dhikr-tabs">${segmented('dhikr', list.map((x) => ({ value: x.id, label: x.title })), d.id)}</div>
-        <div class="dhikr-text" data-z="text">
+        ${dots}
+        <div class="dhikr-text ${slide}" data-z="text">
+          <div class="dhikr-title">${esc(d.title)}</div>
           <div class="dhikr-ar" dir="rtl" lang="ar">${esc(d.arabic)}</div>
           <div class="dhikr-tr">${esc(d.translit)}</div>
           <div class="dhikr-ru">${esc(d.ru)}</div>
         </div>
         <div class="dhikr-pad" data-z="pad" role="button" aria-label="Нажми, чтобы посчитать">
-          ${target ? `<div class="dhikr-goal"><div class="dhikr-bar"><div data-z="bar"></div></div><span data-z="goal">${target}</span></div>` : '<div class="dhikr-goal"></div>'}
-          <div class="dhikr-count" data-z="count">0</div>
+          ${target ? `<div class="dhikr-goal"><div class="dhikr-bar"><div data-z="bar"></div></div><span data-z="goal">${target}</span></div>` : ''}
+          <div class="dhikr-count"><span data-z="count">0</span><span class="dhikr-check" data-z="check">✓</span></div>
+          <div class="dhikr-round" data-z="round"></div>
           <div class="dhikr-today" data-z="today"></div>
-        </div>
-        <div class="dhikr-actions">
-          <button class="btn btn-secondary" data-z="reset">Сбросить</button>
-          <button class="btn btn-primary" data-z="done">Готово</button>
         </div>
       </div>`;
     },
     mount: (a) => {
+      mountDhikrHead(a);
+      slide = '';
       const q = (k) => a.el.querySelector(`[data-z=${k}]`);
-      const countEl = q('count');
-      const barEl = q('bar');
-      const goalEl = q('goal');
-      const todayEl = q('today');
-      const target = Number(st().target) || 0;
-      const paint = () => {
-        const v = counter.shown;
-        countEl.textContent = v;
-        if (barEl) barEl.style.width = `${Math.min(100, (v / target) * 100)}%`;
-        if (goalEl) goalEl.textContent = v >= target ? `${target} ✓` : String(target);
-        a.el.querySelector('.dhikr-goal')?.classList.toggle('is-done', target > 0 && v >= target);
-        todayEl.textContent = `Сегодня всего: ${fmtInt(todayOf(counter.id))}`;
-      };
-      reached = target > 0 && counter.shown >= target;
-      paint();
       const pad = q('pad');
+      const target = tgt();
+      const paint = () => {
+        const r = roundView(counter.shown, target);
+        q('count').textContent = r.value;
+        a.el.querySelector('.dhikr-count').classList.toggle('is-full', r.full);
+        const bar = q('bar');
+        if (bar) bar.style.width = `${target ? (r.full ? 100 : (r.value / target) * 100) : 0}%`;
+        a.el.querySelector('.dhikr-goal')?.classList.toggle('is-done', r.full);
+        q('round').textContent = target && r.rounds && !(r.rounds === 1 && r.full) ? `Круг ${r.full ? r.rounds : r.rounds + 1}` : '';
+        q('today').textContent = `Сегодня всего: ${fmtInt(todayOf(counter.id))}`;
+        return r;
+      };
+      lastRounds = roundView(counter.shown, target).rounds;
+      paint();
       pad.addEventListener('pointerdown', (e) => {
         if (e.button > 0) return;
         e.preventDefault();
-        const v = counter.tap();
-        const haptics = st().haptics !== false;
-        if (target && v >= target && !reached) {
-          reached = true;
+        counter.tap();
+        const r = paint();
+        const haptics = dhikrSettings().haptics !== false;
+        if (r.full && r.rounds > lastRounds) {
           if (haptics) {
             tg.haptic('heavy');
             tg.haptic('success');
           }
         } else if (haptics) tg.haptic('light');
-        paint();
+        lastRounds = r.rounds;
         pad.classList.remove('is-tap');
         void pad.offsetWidth; // перезапуск короткой анимации нажатия
         pad.classList.add('is-tap');
       });
       pad.addEventListener('contextmenu', (e) => e.preventDefault());
-      const switchTo = (id) => {
-        if (id === counter.id) return;
-        counter.switchTo(id);
-        reached = false;
-        setSetting('dhikr.last', id);
+      const go = (dir) => {
+        if (items.length < 2) return;
+        counter.switchTo(items[(idx + dir + items.length) % items.length].id);
+        idx = (idx + dir + items.length) % items.length;
+        setSetting('dhikr.last', cur().id);
+        slide = dir > 0 ? 'slide-next' : 'slide-prev';
         a.refresh();
       };
-      a.el.querySelectorAll('[data-seg=dhikr] button').forEach((b) => (b.onclick = () => switchTo(b.dataset.value)));
-      // свайп по тексту — следующий / предыдущий зикр
+      a.goTo = go; // для проверки
       const text = q('text');
       let sx = null;
-      text.addEventListener('touchstart', (e) => (sx = e.touches[0].clientX), { passive: true });
+      let sy = null;
+      text.addEventListener('touchstart', (e) => ((sx = e.touches[0].clientX), (sy = e.touches[0].clientY)), { passive: true });
       text.addEventListener('touchend', (e) => {
         if (sx == null) return;
         const dx = e.changedTouches[0].clientX - sx;
+        const dy = e.changedTouches[0].clientY - sy;
         sx = null;
-        if (Math.abs(dx) < 50) return;
-        const i = list.findIndex((x) => x.id === counter.id);
-        const next = list[(i + (dx < 0 ? 1 : -1) + list.length) % list.length];
-        switchTo(next.id);
+        if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+        go(dx < 0 ? 1 : -1);
       });
-      q('close').onclick = () => a.close();
-      q('done').onclick = () => {
-        const n = counter.n;
-        a.close();
-        if (n) toast(`${cur().title}: записано ${fmtInt(n)}`);
+      a.el.querySelector('[data-fav]').onclick = () => {
+        toggleFav(cur().id);
+        a.refresh();
       };
-      q('reset').onclick = () => {
-        if (!counter.shown) return;
-        confirmSheet({
-          title: 'Сбросить счёт?',
-          message: counter.n ? `Текущий счёт ${fmtInt(counter.n)} не будет записан.` : 'Счётчик начнётся с нуля (записанное остаётся в статистике).',
-          confirm: 'Сбросить',
-          destructive: true,
-          onConfirm: () => {
-            counter.reset();
-            reached = false;
-            paint();
-          },
-        });
-      };
-      q('menu').onclick = () => openDhikrMenu(() => a.refresh());
+      q('menu').onclick = () => openDhikrMenu({
+        onChange: () => a.refresh(),
+        onReset: () => {
+          if (!counter.shown) return;
+          confirmSheet({
+            title: 'Сбросить счёт?',
+            message: counter.n ? `Текущий счёт ${fmtInt(counter.n)} не будет записан.` : 'Счётчик начнётся с нуля (записанное остаётся в статистике).',
+            confirm: 'Сбросить',
+            destructive: true,
+            onConfirm: () => {
+              counter.reset();
+              lastRounds = 0;
+              paint();
+            },
+          });
+        },
+      });
     },
   });
   return api;
 }
 
-function openDhikrMenu(onChange) {
+function openDhikrMenu({ onChange, onReset }) {
   const st = () => getData().settings.dhikr || {};
   openSheet({
     className: 'sheet-compact',
     render: () => `
       <header class="sheet-header"><span></span><strong>Счётчик</strong><button class="link-btn strong" data-m="ok">Готово</button></header>
       <div class="sheet-body">
-        <div class="group-title">Цель</div>
-        <div class="card pad">${segmented('dtarget', DHIKR_TARGETS.map((t) => ({ value: String(t), label: t ? String(t) : 'Без цели' })), String(Number(st().target) || 0))}</div>
-        <div class="card pad mt">
-          <label class="switch-row"><span>Вибрация</span><input type="checkbox" class="switch" data-m="haptics" ${st().haptics !== false ? 'checked' : ''}></label>
+        <div class="group-title">Цель круга</div>
+        <div class="card pad">${segmented('dtarget', DHIKR_TARGETS.map((t) => ({ value: String(t), label: t ? String(t) : 'Без цели' })), String(Number(st().target) || 0))}
+          <p class="hint">После цели — галочка и вибрация, счёт начинается заново.</p></div>
+        <div class="card list-group mt">
+          <label class="row static switch-row"><span>Вибрация</span><input type="checkbox" class="switch" data-m="haptics" ${st().haptics !== false ? 'checked' : ''}></label>
+          <button class="row is-danger" data-m="reset">${icon.undo(20)}<span>Сбросить счёт</span></button>
         </div>
       </div>`,
     mount: (api) => {
@@ -2367,6 +2496,10 @@ function openDhikrMenu(onChange) {
       }));
       api.el.querySelector('[data-m=haptics]').onchange = (e) => setSetting('dhikr.haptics', e.target.checked);
       api.el.querySelector('[data-m=ok]').onclick = () => api.close();
+      api.el.querySelector('[data-m=reset]').onclick = () => {
+        api.close();
+        onReset();
+      };
     },
   });
 }
