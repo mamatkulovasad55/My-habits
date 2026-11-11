@@ -25,15 +25,37 @@ export const PRAYERS = [
 export const PRAYER_NAME = Object.fromEntries(PRAYERS.map((p) => [p.key, p.name]));
 PRAYER_NAME.sunrise = 'Восход';
 
+// [название, широта, долгота, часовой пояс IANA]
 export const CITIES = [
-  ['Ташкент', 41.2995, 69.2401], ['Самарканд', 39.6542, 66.9597], ['Бухара', 39.7747, 64.4286],
-  ['Андижан', 40.7821, 72.3442], ['Наманган', 40.9983, 71.6726], ['Фергана', 40.3864, 71.7864],
-  ['Коканд', 40.5286, 70.9425], ['Нукус', 42.46, 59.61], ['Ургенч', 41.55, 60.6333],
-  ['Карши', 38.8606, 65.7891], ['Термез', 37.2242, 67.2783], ['Джизак', 40.1158, 67.8422],
-  ['Навои', 40.0844, 65.3792], ['Гулистан', 40.4897, 68.7842], ['Алматы', 43.222, 76.8512],
-  ['Бишкек', 42.8746, 74.5698], ['Душанбе', 38.5598, 68.787], ['Москва', 55.7558, 37.6173],
-  ['Санкт-Петербург', 59.9343, 30.3351], ['Казань', 55.7963, 49.1088], ['Стамбул', 41.0082, 28.9784],
+  ['Ташкент', 41.2995, 69.2401, 'Asia/Tashkent'], ['Самарканд', 39.6542, 66.9597, 'Asia/Tashkent'], ['Бухара', 39.7747, 64.4286, 'Asia/Tashkent'],
+  ['Андижан', 40.7821, 72.3442, 'Asia/Tashkent'], ['Наманган', 40.9983, 71.6726, 'Asia/Tashkent'], ['Фергана', 40.3864, 71.7864, 'Asia/Tashkent'],
+  ['Коканд', 40.5286, 70.9425, 'Asia/Tashkent'], ['Нукус', 42.46, 59.61, 'Asia/Tashkent'], ['Ургенч', 41.55, 60.6333, 'Asia/Tashkent'],
+  ['Карши', 38.8606, 65.7891, 'Asia/Tashkent'], ['Термез', 37.2242, 67.2783, 'Asia/Tashkent'], ['Джизак', 40.1158, 67.8422, 'Asia/Tashkent'],
+  ['Навои', 40.0844, 65.3792, 'Asia/Tashkent'], ['Гулистан', 40.4897, 68.7842, 'Asia/Tashkent'], ['Алматы', 43.222, 76.8512, 'Asia/Almaty'],
+  ['Бишкек', 42.8746, 74.5698, 'Asia/Bishkek'], ['Душанбе', 38.5598, 68.787, 'Asia/Dushanbe'], ['Москва', 55.7558, 37.6173, 'Europe/Moscow'],
+  ['Санкт-Петербург', 59.9343, 30.3351, 'Europe/Moscow'], ['Казань', 55.7963, 49.1088, 'Europe/Moscow'], ['Стамбул', 41.0082, 28.9784, 'Europe/Istanbul'],
 ];
+
+/** Часовой пояс для режима «Автоматически»: пояс города из списка, для своих координат — пояс устройства. */
+export function cityTz(settings, deviceTz = '') {
+  const c = CITIES.find(([n]) => n === settings?.prayer?.city);
+  return c ? c[3] : deviceTz || settings?.tz || '';
+}
+
+/** Пояс, который должен стоять в settings.tz (null — менять не нужно: ручной режим). */
+export function autoTz(settings, deviceTz = '') {
+  if (settings?.tzAuto === false) return null;
+  return cityTz(settings, deviceTz) || null;
+}
+
+/** «UTC+5», «UTC+5:30», «UTC−3». */
+export function tzLabel(tz, date = new Date()) {
+  const h = tzOffsetHours(tz, date);
+  const sign = h < 0 ? '−' : '+';
+  const a = Math.abs(h);
+  const m = Math.round((a % 1) * 60);
+  return `UTC${h === 0 ? '' : sign + Math.floor(a) + (m ? ':' + String(m).padStart(2, '0') : '')}`;
+}
 
 function julian(y, m, d) {
   if (m <= 2) {

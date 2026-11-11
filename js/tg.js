@@ -3,6 +3,8 @@ const W = () => window.Telegram?.WebApp;
 
 export const inTelegram = () => Boolean(W()?.initData);
 export const initData = () => W()?.initData || '';
+/** Пользователь Telegram из initData (не сохраняется): { first_name, last_name, username, photo_url }. */
+export const user = () => W()?.initDataUnsafe?.user || null;
 export const colorScheme = () => W()?.colorScheme || null;
 
 export function init({ onBack, onTheme } = {}) {

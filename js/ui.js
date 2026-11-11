@@ -27,6 +27,7 @@ export const icon = {
   today: (s) => svg('<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.7 2.7L16.5 9.5"/>', s),
   shield: (s) => svg('<path d="M12 3 5 6v5.5c0 4.3 3 8 7 9.5 4-1.5 7-5.2 7-9.5V6z"/><path d="m9 12 2 2 4-4"/>', s),
   chart: (s) => svg('<path d="M5 20V11M12 20V5M19 20v-6"/>', s, 2.4),
+  person: (s) => svg('<circle cx="12" cy="8" r="4"/><path d="M4.5 20.5c.8-3.9 3.8-6 7.5-6s6.7 2.1 7.5 6"/>', s),
   gear: (s) => svg('<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>', s),
   plus: (s) => svg('<path d="M12 5v14M5 12h14"/>', s, 2.4),
   minus: (s) => svg('<path d="M5 12h14"/>', s, 2.4),
@@ -145,6 +146,10 @@ export const weekdayLetter = (d) => WEEKDAYS_LETTER[d.getDay()];
 // ---------- Шторки (bottom sheet) ----------
 
 const sheets = [];
+// «Назад» без шторок: подэкран внутри вкладки (Профиль → раздел)
+let baseBack = () => false;
+export const setBaseBack = (fn) => (baseBack = fn);
+export const syncBackButton = () => tg.backButton(sheets.length > 0 || Boolean(baseBack()));
 
 /**
  * Открыть шторку. render() возвращает HTML; если live=true —
@@ -182,7 +187,7 @@ export function openSheet({ render, mount, live = false, className = '', onClose
       } catch (e) {
         console.error(e);
       }
-      tg.backButton(sheets.length > 0);
+      syncBackButton();
       backdrop.classList.remove('is-open');
       el.classList.add('is-closing');
       setTimeout(() => {
