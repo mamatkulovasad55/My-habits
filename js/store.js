@@ -2,6 +2,7 @@
 import { uid } from './util.js';
 import { migrate, SCHEMA_VERSION } from './migrate.js';
 import { storageGet, storageSet } from './storage.js';
+import { materialize, stampChanges, stampAll, mergeSettings, adoptStamps } from './settings-merge.js';
 
 const DATA_KEY = 'myhabits:data:v1';
 const LOCAL_KEY = 'myhabits:local:v1'; // данные, привязанные к устройству (запущенные таймеры)
@@ -50,14 +51,15 @@ export function emptyData() {
     logs: {},
     abstain: [],
     notes: {},
-    settings: defaultSettings(),
+    settings: normalizeSettings(undefined), // значения по умолчанию с метками 0
   };
 }
 
-function normalizeSettings(s) {
+function normalizeSettings(raw) {
   const d = defaultSettings();
-  s = s && typeof s === 'object' ? s : {};
-  return {
+  const s = raw && typeof raw === 'object' ? raw : {};
+  // метки полей (settings._t) — см. settings-merge.js
+  return materialize(s, {
     ...d,
     ...s,
     quiet: { ...d.quiet, ...(s.quiet || {}) },
@@ -71,7 +73,7 @@ function normalizeSettings(s) {
     tartib: { ...d.tartib, ...(s.tartib || {}) },
     dhikr: { ...d.dhikr, ...(s.dhikr || {}) },
     profile: { ...d.profile, ...(s.profile || {}) },
-  };
+  }, d);
 }
 
 // Поля верхнего уровня, которые этот код понимает. Остальные (разделы из будущих версий) сохраняются как есть.
@@ -181,11 +183,12 @@ export function prepareImport(local, imported, now = Date.now()) {
   for (const [day, n] of Object.entries(imported.notes || {})) notes[day] = (n?.t || 0) >= resetAt ? n : { ...n, t: now };
   out.logs = logs;
   out.notes = notes;
-  if (imported.settings && (imported.settings.updatedAt || 0) < resetAt) out.settings = { ...imported.settings, updatedAt: now };
+  // настройки из файла — новее сброса: свежие метки всем полям
+  if (imported.settings && (imported.settings.updatedAt || 0) < resetAt) out.settings = stampAll(normalizeSettings(clone(imported.settings)), now);
   return out;
 }
 
-export function merge(a, b) {
+export function merge(a, b, { serverNow } = {}) {
   a = normalize(a);
   b = normalize(b);
   const habits = mergeEntities(a.habits, b.habits);
@@ -221,9 +224,12 @@ export function merge(a, b) {
     logs,
     abstain: mergeEntities(a.abstain, b.abstain),
     notes,
-    settings: (b.settings.updatedAt || 0) > (a.settings.updatedAt || 0) ? b.settings : a.settings,
+    // по полям: по каждой настройке — более свежее изменение (serverNow — только на сервере)
+    settings: normalizeSettings(mergeSettings(a.settings, b.settings, { serverNow })),
   };
 }
+
+const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
 // ---------- Хранилище ----------
 
@@ -256,6 +262,15 @@ export function subscribe(fn) {
 
 const emit = () => subscribers.forEach((fn) => fn(data));
 
+/**
+ * После синхронизации: локальные метки, которые сервер урезал (часы устройства спешат), заменить серверными
+ * там, где значения совпадают. Возвращает данные для финального слияния.
+ */
+export function adoptServerStamps(local, server) {
+  const l = normalize(local);
+  return { ...l, settings: adoptStamps(l.settings, normalize(server).settings) };
+}
+
 /** Заменить данные целиком (после синхронизации/импорта). */
 export function replaceData(next, { notifySync = false } = {}) {
   data = normalize(next);
@@ -266,7 +281,10 @@ export function replaceData(next, { notifySync = false } = {}) {
 
 /** Изменить данные: fn получает черновик и мутирует его. */
 export function update(fn) {
+  const before = clone(data.settings);
   fn(data);
+  // метки изменившимся настройкам; updatedAt настроек = max(_t), даже если код выше выставил его сам
+  stampChanges(before, data.settings, Date.now());
   data.updatedAt = Date.now();
   writeJSON(DATA_KEY, data);
   emit();
@@ -400,7 +418,7 @@ export function resetAll(keepOld = null, now = Date.now()) {
     d.resetAt = now;
     d.settings.profile = { ...(d.settings.profile || {}), niyyah: '' };
     if (keepOld) d.settings.qada = { ...d.settings.qada, old: { ...d.settings.qada?.old, ...keepOld } };
-    d.settings.updatedAt = now;
+    stampAll(d.settings, now); // настройки после сброса — самые новые, старые с сервера их не перебьют
   });
 }
 

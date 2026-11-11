@@ -30,7 +30,8 @@ const strip = (d) => {
   for (const k of ['logs', 'abstain', 'notes']) assert.deepEqual(n[k], old[k], `${k} без изменений`);
   assert.deepEqual(n.habits, expected.habits);
   const D = defaultSettings();
-  assert.deepEqual(n.settings, { ...D, ...old.settings, qada: { ...D.qada, ...old.settings.qada, vitrSince: VITR_DEBT_RELEASE }, tartib: { ...D.tartib, enabled: true, asked: true } });
+  const { _t: _stamps, updatedAt: _upd, ...nSettings } = n.settings; // метки полей — отдельно, в settings-merge.test
+  assert.deepEqual({ ...nSettings, updatedAt: old.settings.updatedAt ?? D.updatedAt }, { ...D, ...old.settings, qada: { ...D.qada, ...old.settings.qada, vitrSince: VITR_DEBT_RELEASE }, tartib: { ...D.tartib, enabled: true, asked: true } });
   assert.equal(normalize({}).settings.tartib.enabled, false, 'новый пользователь: тартиб выключен');
   assert.equal(normalize({ habits: [{ id: 'w', stages: [{ id: 's', time: { mode: 'fixed', at: '08:00' } }] }] }).settings.tartib.enabled, false, 'без намазов — выключен');
   assert.deepEqual(migrate(m), m, 'идемпотентно');

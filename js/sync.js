@@ -1,7 +1,7 @@
 // Синхронизация через свой сервер (Cloudflare Worker).
 // Сервер проверяет подпись Telegram, сливает данные с приватным репозиторием и возвращает результат.
 // На устройстве не хранится ни одного токена.
-import { getData, replaceData, merge } from './store.js';
+import { getData, replaceData, merge, adoptServerStamps } from './store.js';
 import { stableStringify } from './util.js';
 import { WORKER_URL } from './config.js';
 import { inTelegram, initData } from './tg.js';
@@ -65,7 +65,8 @@ export async function syncNow() {
     const { data } = await api('/api/sync', { data: sent });
     // за время запроса могли появиться новые отметки — сливаем ещё раз
     const now = getData();
-    const final = merge(now, data);
+    // метки настроек, урезанные сервером (часы устройства спешат), — принять серверные, иначе синхронизация зациклится
+    const final = merge(adoptServerStamps(now, data), data);
     if (stableStringify(final) !== stableStringify(now)) replaceData(final);
     if (stableStringify(final) !== stableStringify(merge(data, {}))) pending = true;
     setStatus({ state: 'idle', last: Date.now() });
