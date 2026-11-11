@@ -22,7 +22,7 @@ export function typicalData() {
       { id: 'gym', name: 'Зарядка', emoji: '💪', type: 'check', createdAt: created, updatedAt: 1, order: 3, schedule: { kind: 'daily' }, reminders: [{ mode: 'fixed', at: '07:15' }] },
     ],
     logs: {},
-    abstain: [{ id: 'a1', name: 'Без сигарет', emoji: '🚭', createdAt: created, updatedAt: 1, start: created, cleanDays: [], relapses: [] }],
+    abstain: [{ id: 'a1', name: 'Без сигарет', emoji: '🚭', createdAt: created, updatedAt: 1, startedAt: created, cleanDays: [], relapses: [] }],
     notes: {},
   };
 }
