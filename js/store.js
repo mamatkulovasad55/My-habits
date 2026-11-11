@@ -1,6 +1,7 @@
 // Состояние приложения: локальный кэш в localStorage + слияние для синхронизации.
 import { uid } from './util.js';
 import { migrate, SCHEMA_VERSION } from './migrate.js';
+import { storageGet, storageSet } from './storage.js';
 
 const DATA_KEY = 'myhabits:data:v1';
 const LOCAL_KEY = 'myhabits:local:v1'; // данные, привязанные к устройству (запущенные таймеры)
@@ -228,19 +229,16 @@ export function merge(a, b) {
 
 function readJSON(key, fallback) {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = storageGet(key);
     return raw ? JSON.parse(raw) : fallback;
   } catch {
     return fallback;
   }
 }
 
+/** Запись через обёртку: при сбое данные остаются в памяти, а приложение показывает предупреждение. */
 function writeJSON(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* хранилище недоступно — работаем в памяти */
-  }
+  return storageSet(key, JSON.stringify(value));
 }
 
 let data = normalize(readJSON(DATA_KEY, null));

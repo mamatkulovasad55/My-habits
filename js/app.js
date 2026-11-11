@@ -6,6 +6,7 @@ import {
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
+import { storage, storageGet, storageSet, storageRemove, storageFailed, onStorageStatus } from './storage.js';
 import * as tg from './tg.js';
 import { WORKER_URL } from './config.js';
 import {
@@ -236,11 +237,7 @@ function tzBanner() {
 
 function namazBanner() {
   if (state.reorder || dkey(state.day) !== todayKey()) return '';
-  try {
-    if (localStorage.getItem('myhabits:namaz-banner') === 'hide') return '';
-  } catch {
-    /* ignore */
-  }
+  if (storageGet('myhabits:namaz-banner') === 'hide') return '';
   const found = findNamazHabits();
   if (found.length < 3) return '';
   return `<section class="card pad banner">
@@ -2352,15 +2349,68 @@ function mountProfile() {
         const debt = qadaDebt().byPrayer;
         resetAll(Object.fromEntries(QADA_KEYS.map((k) => [k, debt[k].oldLeft])));
         updateLocal((l) => (l.timers = {}));
-        try {
-          localStorage.removeItem(DHIKR_PENDING_KEY);
-        } catch {
-          /* ignore */
-        }
+        storageRemove(DHIKR_PENDING_KEY);
         toast('Все данные удалены');
       },
     });
 }
+
+// ============================================================
+// Сбой записи на устройство (localStorage переполнен или недоступен)
+// ============================================================
+
+let storageWarnHidden = false; // ✕ — скрыть до конца текущего сбоя
+
+function storageWarnStatus() {
+  const s = sync.getStatus();
+  const since = storageFailed()?.at || 0;
+  if (s.state === 'syncing') return 'Отправляю на сервер…';
+  if (s.state === 'offline' || navigator.onLine === false) return 'Нет сети — отправлю при подключении. Не закрывай приложение.';
+  if (s.state === 'error') return `Сервер: ${s.error || 'ошибка'} — нажми «Синхронизировать»`;
+  if (s.last && s.last >= since) return `✓ Отправлено на сервер · ${new Date(s.last).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} `;
+  return 'Ещё не отправлено на сервер';
+}
+
+function renderStorageWarn() {
+  let el = document.getElementById('storage-warn');
+  const show = Boolean(storageFailed()) && !storageWarnHidden && tg.inTelegram();
+  if (!show) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'storage-warn';
+    el.className = 'storage-warn';
+    el.setAttribute('role', 'alert');
+    document.body.appendChild(el);
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sw]');
+      if (!b) return;
+      if (b.dataset.sw === 'sync') sync.syncNow();
+      if (b.dataset.sw === 'close') {
+        storageWarnHidden = true;
+        renderStorageWarn();
+      }
+    });
+  }
+  const quota = /quota/i.test(storageFailed()?.name || '');
+  el.innerHTML = `<button class="storage-warn-close" data-sw="close" aria-label="Скрыть">${icon.close(14)}</button>
+    <b>⚠️ Данные не сохраняются на устройстве${quota ? ' — память переполнена' : ''}</b>
+    <span>Не закрывай приложение, пока они не отправлены на сервер.</span>
+    <div class="storage-warn-foot"><span class="storage-warn-status">${esc(storageWarnStatus())}</span><button class="link-btn strong" data-sw="sync">Синхронизировать</button></div>`;
+}
+
+onStorageStatus((fail) => {
+  storageWarnHidden = false;
+  renderStorageWarn();
+  if (!fail) return;
+  tg.haptic('warning');
+  // сразу отправить данные на сервер (дальше действия синхронизируются как обычно)
+  if (navigator.onLine !== false) sync.syncNow();
+});
+sync.onStatus(() => storageFailed() && renderStorageWarn());
+window.addEventListener('offline', () => storageFailed() && renderStorageWarn());
 
 let firstSyncDone = false;
 sync.onStatus(() => {
@@ -2456,12 +2506,8 @@ function renderBlocked(title, text, extra = '') {
 
 async function renderGate() {
   // старая версия хранила токен GitHub в браузере — удаляем его с устройства
-  try {
-    localStorage.removeItem('myhabits:sync:v1');
-    localStorage.removeItem('myhabits:pushkey:v1');
-  } catch {
-    /* ignore */
-  }
+  storageRemove('myhabits:sync:v1');
+  storageRemove('myhabits:pushkey:v1');
   const hasLocal = habitsAll().length || abstainAll().length;
   renderBlocked(
     'Трекер теперь в Telegram',
@@ -2498,13 +2544,8 @@ const loadDhikr = () => (DHIKR ? Promise.resolve(DHIKR) : fetch('./data/dhikr.js
 const fmtInt = (n) => Number(n || 0).toLocaleString('ru-RU');
 let dhikrCounter = null;
 
-function safeStorage() {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
+/** Хранилище для счётчика зикров — через общую обёртку (сбой записи виден пользователю). */
+const safeStorage = () => storage;
 
 /** Запуск приложения: незаписанный подход (Telegram закрыли посреди счёта) — в журнал. */
 function recoverDhikr() {
@@ -2860,11 +2901,7 @@ document.addEventListener('click', (e) => {
     case 'locate-city': return locateCity();
     case 'merge-namaz': return mergeNamaz();
     case 'hide-namaz':
-      try {
-        localStorage.setItem('myhabits:namaz-banner', 'hide');
-      } catch {
-        /* ignore */
-      }
+      storageSet('myhabits:namaz-banner', 'hide');
       return render();
     case 'add-abstain': return openAbstainEditor();
     case 'open-abstain': return openAbstainDetail(id);
