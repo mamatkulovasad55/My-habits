@@ -34,7 +34,7 @@ export function defaultSettings() {
     forbidden: { sunrise: 15, zenith: 10, sunset: 15 },
     // порядок восполнения (сахиб ат-тартиб); limit/countVitr — уточняются у имама
     tartib: { enabled: false, limit: 6, countOld: false, countVitr: true, asked: false },
-    dhikr: { target: 33, haptics: true, last: 'subhanallah' }, // счётчик зикров: цель (0 — без цели), вибрация, последний зикр
+    dhikr: { target: 33, haptics: true, last: 'subhanallah', favorites: [] }, // счётчик зикров: цель (0 — без цели), вибрация, последний зикр
   };
 }
 

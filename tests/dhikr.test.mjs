@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { setNow } from './helpers.mjs';
 import { typicalData } from './fixtures.mjs';
-import { createCounter, recoverPending, dhikrTotals, dhikrSums, DHIKR_PENDING_KEY, DHIKR_LOG } from '../js/dhikr.js';
+import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_PENDING_KEY, DHIKR_LOG } from '../js/dhikr.js';
 import { replaceData, getData, addDhikrRecord, merge } from '../js/store.js';
 import { dayStats } from '../js/logic.js';
 
@@ -116,4 +116,41 @@ replaceData(typicalData());
   assert.equal(dhikrSums(getData(), until, 30).byId.subhanallah, 1132);
   assert.deepEqual(dayStats(new Date(2026, 10, 11)), before, 'кольцо дня не меняется');
   console.log('✓ суммы за 7 и 30 дней; итоги дня не зависят от зикров');
+}
+
+// 7. Круги: после цели — ✓, затем счёт с 1; в журнал — общее число нажатий
+{
+  assert.deepEqual(roundView(0, 33), { value: 0, rounds: 0, full: false });
+  assert.deepEqual(roundView(32, 33), { value: 32, rounds: 0, full: false });
+  assert.deepEqual(roundView(33, 33), { value: 33, rounds: 1, full: true });
+  assert.deepEqual(roundView(34, 33), { value: 1, rounds: 1, full: false });
+  assert.deepEqual(roundView(66, 33), { value: 33, rounds: 2, full: true });
+  assert.deepEqual(roundView(70, 33), { value: 4, rounds: 2, full: false });
+  assert.deepEqual(roundView(150, 0), { value: 150, rounds: 0, full: false }, 'без цели — растущее число');
+  replaceData(typicalData());
+  const c = createCounter({ storage: memStorage(), record: addDhikrRecord });
+  for (let i = 0; i < 70; i++) c.tap();
+  assert.equal(roundView(c.shown, 33).value, 4);
+  c.switchTo('alhamdulillah'); // свайп на следующий
+  assert.deepEqual(allEvents().map((e) => e.n), [70], 'одна запись n = 70, круги не влияют');
+  console.log('✓ круги: 33 ✓ → 1, 70 нажатий = круг 3 со счётом 4; в журнале одна запись n = 70');
+}
+
+// 8. Разделы: избранное, цель элемента, всего за всё время, «Сейчас»
+{
+  const s = { dhikr: { target: 33, favorites: ['astaghfirullah', 'nope', 'subhanallah'] } };
+  assert.deepEqual(collectionItems('favorites', list, s).map((x) => x.id), ['astaghfirullah', 'subhanallah']);
+  assert.equal(collectionItems('all', list, s).length, 4);
+  assert.deepEqual(collectionItems('morning', list, s), [], 'утренние азкары — позже');
+  assert.equal(targetFor(list[0], s), 33);
+  assert.equal(targetFor({ ...list[0], count: 3 }, s), 3, 'свой счёт повторов важнее общей цели');
+  assert.equal(targetFor(list[0], { dhikr: { target: 0 } }), 0);
+  replaceData(typicalData());
+  addDhikrRecord('2026-11-01', 'subhanallah', 40);
+  addDhikrRecord('2026-11-11', 'subhanallah', 2);
+  assert.deepEqual(dhikrAllTime(getData()), { subhanallah: 42 });
+  const morning = DHIKR_COLLECTIONS.find((c) => c.id === 'morning');
+  const pr = { fajr: 340, dhuhr: 727, asr: 925, isha: 1106 };
+  assert.ok(collectionIsNow(morning, pr, 400) && !collectionIsNow(morning, pr, 800));
+  console.log('✓ разделы: избранное, свой count, «всего» за всё время, метка «Сейчас» по времени намаза');
 }

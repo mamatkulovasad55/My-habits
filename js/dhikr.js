@@ -116,3 +116,62 @@ export function recoverPending(storage, record) {
   record(p.day, p.id, Number(p.n), p.startedAt || Date.now());
   return Number(p.n);
 }
+
+// ---------- Круги и разделы ----------
+
+/**
+ * Отображение счёта по кругам: при цели 33 после 33-го нажатия — «33 ✓», следующее — «1» нового круга.
+ * value — число в текущем круге, rounds — завершённых кругов, full — круг только что завершён.
+ */
+export function roundView(shown, target) {
+  shown = Math.max(0, Math.floor(Number(shown) || 0));
+  target = Math.max(0, Math.floor(Number(target) || 0));
+  if (!target) return { value: shown, rounds: 0, full: false };
+  const rounds = Math.floor(shown / target);
+  const rest = shown % target;
+  if (shown > 0 && rest === 0) return { value: target, rounds, full: true };
+  return { value: rest, rounds, full: false };
+}
+
+/** Цель для зикра: свой счёт повторов элемента (у азкаров — count) или общая цель пользователя. */
+export const targetFor = (item, settings) => (Number(item?.count) > 0 ? Number(item.count) : Math.max(0, Number(settings?.dhikr?.target) || 0));
+
+/** Итог за всё время по каждому зикру. */
+export function dhikrAllTime(data) {
+  const byId = {};
+  for (const e of Object.values(data?.logs?.[DHIKR_LOG] || {})) {
+    for (const ev of Array.isArray(e?.ev) ? e.ev : []) {
+      if (ev.k === 'dhikr' && Number(ev.n) > 0) byId[ev.s] = (byId[ev.s] || 0) + Number(ev.n);
+    }
+  }
+  return byId;
+}
+
+/**
+ * Разделы главного экрана зикров. Элемент раздела — { id, title, arabic, translit, ru, count? }.
+ * Утренние и вечерние азкары пока пустые (soon): тексты будут добавлены отдельным файлом
+ * того же формата; count — сколько раз читать (вместо общей цели). window — когда показывать метку «Сейчас».
+ */
+export const DHIKR_COLLECTIONS = [
+  { id: 'all', title: 'Все зикры', icon: '📿', tint: 'green' },
+  { id: 'favorites', title: 'Избранное', icon: '★', tint: 'orange' },
+  { id: 'morning', title: 'Утренние азкары', icon: '☀︎', tint: 'morning', soon: true, window: ['fajr', 'dhuhr'] },
+  { id: 'evening', title: 'Вечерние азкары', icon: '☾', tint: 'evening', soon: true, window: ['asr', 'isha'] },
+];
+
+/** Элементы раздела. extra — тексты будущих разделов: { morning: [...], evening: [...] }. */
+export function collectionItems(id, list, settings, extra = {}) {
+  if (id === 'all') return list;
+  if (id === 'favorites') {
+    const fav = settings?.dhikr?.favorites || [];
+    return fav.map((f) => list.find((x) => x.id === f)).filter(Boolean);
+  }
+  return extra[id] || [];
+}
+
+/** Идёт ли сейчас время раздела (по минутам дня и времени намаза prayers). */
+export function collectionIsNow(col, prayers, min) {
+  if (!col?.window || !prayers) return false;
+  const [a, b] = col.window;
+  return min >= prayers[a] && min < prayers[b];
+}
