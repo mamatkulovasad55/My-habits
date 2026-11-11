@@ -120,3 +120,15 @@ for (const city of ['Стамбул', 'Ташкент']) {
   assert.equal(JSON.parse(net.remote).settings.tz, 'Mars/Olympus_Mons', 'данные на сервере не изменены');
   console.log('✓ неизвестный пояс: бот считает по поясу города, напоминание о Зухре в 12:07');
 }
+
+// 7. Расхождение пояса телефона и профиля (сравнение по смещению, не по названию)
+{
+  const { tzMismatch, offsetLabel } = await import('../js/prayer.js');
+  const at = new Date(Date.UTC(2026, 10, 11, 12));
+  assert.equal(tzMismatch(st('Ташкент', { tz: 'Asia/Tashkent' }), at, 5), null);
+  assert.equal(tzMismatch(st('Самарканд', { tz: 'Asia/Samarkand' }), at, 5), null, 'другое название, то же смещение');
+  assert.deepEqual(tzMismatch(st('Ташкент', { tz: 'Asia/Tashkent' }), at, 3), { device: 3, profile: 5 });
+  assert.equal(tzMismatch(st('Ташкент', { tz: '' }), at, 3), null, 'пояс ещё не задан');
+  assert.equal(offsetLabel(-3.5), 'UTC−3:30');
+  console.log('✓ расхождение поясов: телефон UTC+3, профиль UTC+5 → предупреждение');
+}

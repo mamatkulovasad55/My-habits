@@ -48,14 +48,27 @@ export function autoTz(settings, deviceTz = '') {
   return cityTz(settings, deviceTz) || null;
 }
 
-/** «UTC+5», «UTC+5:30», «UTC−3». */
-export function tzLabel(tz, date = new Date()) {
-  const h = tzOffsetHours(tz, date);
+/**
+ * Часы устройства идут не по поясу профиля? Приложение сравнивает «сейчас» по часам устройства с временем намаза
+ * в поясе профиля, поэтому при расхождении отметки «вовремя / ещё не наступил» сдвигаются.
+ * Возвращает { device, profile } — смещения в часах — или null, если совпадают (сравнение по смещению, не по названию).
+ */
+export function tzMismatch(settings, date = new Date(), deviceOffset = -date.getTimezoneOffset() / 60) {
+  if (!settings?.tz) return null;
+  const profile = tzOffsetHours(settings.tz, date);
+  return profile === deviceOffset ? null : { device: deviceOffset, profile };
+}
+
+/** Подпись смещения: 5 → «UTC+5», -3.5 → «UTC−3:30». */
+export function offsetLabel(h) {
   const sign = h < 0 ? '−' : '+';
   const a = Math.abs(h);
   const m = Math.round((a % 1) * 60);
   return `UTC${h === 0 ? '' : sign + Math.floor(a) + (m ? ':' + String(m).padStart(2, '0') : '')}`;
 }
+
+/** «UTC+5», «UTC+5:30», «UTC−3». */
+export const tzLabel = (tz, date = new Date()) => offsetLabel(tzOffsetHours(tz, date));
 
 function julian(y, m, d) {
   if (m <= 2) {

@@ -15,7 +15,7 @@ import {
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
-import { PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel } from './prayer.js';
+import { PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel, tzMismatch, offsetLabel } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
 import { forbiddenWindows } from './logic.js';
 import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS } from './dhikr.js';
@@ -188,6 +188,7 @@ function viewToday() {
     <nav class="week-strip">${strip}</nav>
     ${abstChips}
     ${summary}
+    ${dkey(state.day) === todayKey() && !state.reorder ? tzBanner() : ''}
     ${namazBanner()}
     ${state.reorder ? reorderList() : `
     ${due.length ? `<section class="list">${due.map((h) => habitCard(h, day)).join('')}</section>` : ''}
@@ -218,6 +219,19 @@ function findNamazHabits() {
     for (const [k, list] of Object.entries(NAMAZ_ALIASES)) if (list.includes(n)) found.push({ h, prayer: k });
   }
   return found;
+}
+
+/** Предупреждение: часы телефона идут не по поясу профиля — время намаза и отметки расходятся. */
+function tzBanner() {
+  const st = getData().settings;
+  const mm = tzMismatch(st);
+  if (!mm) return '';
+  const auto = st.tzAuto !== false;
+  return `<section class="card pad banner is-warn">
+    <div class="banner-title">🕰 Часовой пояс не совпадает</div>
+    <p>Телефон живёт по ${offsetLabel(mm.device)}, а в профиле — ${offsetLabel(mm.profile)}${auto && st.prayer.city ? ` (${esc(st.prayer.city)})` : ''}. Время намаза и напоминания считаются по профилю, поэтому отметки «вовремя» могут сдвигаться.</p>
+    <div class="btn-row">${auto ? `<button class="btn btn-primary" data-action="locate-city">📍 Обновить город</button><a class="btn btn-secondary" href="#profile/city">Выбрать город</a>` : `<a class="btn btn-primary" href="#profile/tz">Часовой пояс</a>`}</div>
+  </section>`;
 }
 
 function namazBanner() {
@@ -1686,6 +1700,7 @@ function viewProfile() {
   const archived = habitsAll().filter((h) => h.archived).length;
   return `
     ${profileHead()}
+    ${tzBanner()}
     ${niyyahCard(st)}
 
     <div class="group-title">Личные параметры</div>
@@ -2211,24 +2226,27 @@ function mountPrefs() {
     });
   };
   const geo = view.querySelector('[data-pr=geo]');
-  if (geo) geo.onclick = () => {
-    if (!navigator.geolocation) return toast('Геолокация недоступна');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = Math.round(pos.coords.latitude * 10000) / 10000;
-        const lon = Math.round(pos.coords.longitude * 10000) / 10000;
-        const near = CITIES.map(([n, la, lo]) => [n, Math.hypot(la - lat, lo - lon)]).sort((a, b) => a[1] - b[1])[0];
-        update((d) => {
-          d.settings.prayer = { ...d.settings.prayer, lat, lon, city: near && near[1] < 0.3 ? near[0] : 'Мои координаты' };
-          applyAutoTz(d.settings);
-          d.settings.updatedAt = Date.now();
-        });
-        toast('Координаты обновлены');
-      },
-      () => toast('Не удалось определить местоположение'),
-      { timeout: 10000 },
-    );
-  };
+  if (geo) geo.onclick = locateCity;
+}
+
+/** «Где я»: координаты устройства → ближайший город из списка или свои координаты; в авто-режиме — и пояс. */
+function locateCity() {
+  if (!navigator.geolocation) return toast('Геолокация недоступна — выбери город в Профиле');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = Math.round(pos.coords.latitude * 10000) / 10000;
+      const lon = Math.round(pos.coords.longitude * 10000) / 10000;
+      const near = CITIES.map(([n, la, lo]) => [n, Math.hypot(la - lat, lo - lon)]).sort((a, b) => a[1] - b[1])[0];
+      update((d) => {
+        d.settings.prayer = { ...d.settings.prayer, lat, lon, city: near && near[1] < 0.3 ? near[0] : 'Мои координаты' };
+        applyAutoTz(d.settings);
+        d.settings.updatedAt = Date.now();
+      });
+      toast(`Город: ${getData().settings.prayer.city} · ${tzValue(getData().settings)}`);
+    },
+    () => toast('Не удалось определить местоположение — выбери город в Профиле'),
+    { timeout: 10000 },
+  );
 }
 
 /** Режим «Автоматически»: пояс следует за городом (для своих координат — пояс устройства). */
@@ -2834,6 +2852,7 @@ document.addEventListener('click', (e) => {
     case 'reorder': state.reorder = true; return render();
     case 'reorder-done': state.reorder = false; return render();
     case 'checkin': return openCheckin();
+    case 'locate-city': return locateCity();
     case 'merge-namaz': return mergeNamaz();
     case 'hide-namaz':
       try {
