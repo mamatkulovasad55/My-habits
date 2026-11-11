@@ -107,6 +107,9 @@ export function stagesForDay(h, date, ctx = dayContext(date)) {
 }
 
 /** Текущий этап: последний начавшийся невыполненный, иначе ближайший невыполненный. */
+/** Через сколько минут после начала Иши повторить напоминание, если не отмечено. */
+export const ISHA_REPEAT_AFTER = 150;
+
 export function currentStage(h, date, nowMin, ctx) {
   const key = dkey(date);
   const st = stagesForDay(h, date, ctx);
@@ -159,7 +162,18 @@ export function dueReminders(date, fromMin, toMin) {
             url: './#today',
           });
         }
-        if (repeat) {
+        // Иша: время до Фаджра, поэтому два повтора — вечером и утром перед Фаджром
+        const isha = isPrayer && s.time.prayer === 'isha' && s.role !== 'vitr' && s.end > 1440;
+        if (repeat && isha) {
+          const evening = Math.min(s.start + ISHA_REPEAT_AFTER, s.end - 60);
+          const both = vitr ? 'Иша и Витр ещё не отмечены' : 'Иша ещё не отмечен';
+          if (inWindow(evening)) {
+            out.push({ key: `${key}:${h.id}:${s.id}:2`, title: `${h.emoji} ${both}`, body: `Время до Фаджра (${fmtMin(s.end - 1440)}). Отметь, когда прочитаешь.`, url: './#today' });
+          }
+          if (inWindow(s.end - 25)) {
+            out.push({ key: `${key}:${h.id}:${s.id}:3`, title: `🌅 ${both}`, body: `До Фаджра около 25 минут (${fmtMin(s.end - 1440)}). Если уже прочитал — отметь, кнопка на карточке отметит вчерашний день.`, url: './#today' });
+          }
+        } else if (repeat) {
           let r = s.start + repeat;
           if (isPrayer && s.end - 25 > s.start + 10) r = s.end - 25;
           if (inWindow(r) && (isPrayer || !inQuiet(r, settings))) {
