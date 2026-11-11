@@ -1,5 +1,6 @@
 // Состояние приложения: локальный кэш в localStorage + слияние для синхронизации.
 import { uid } from './util.js';
+import { migrate, SCHEMA_VERSION } from './migrate.js';
 
 const DATA_KEY = 'myhabits:data:v1';
 const LOCAL_KEY = 'myhabits:local:v1'; // данные, привязанные к устройству (запущенные таймеры)
@@ -34,6 +35,7 @@ export function defaultSettings() {
 export function emptyData() {
   return {
     version: 1,
+    schemaVersion: SCHEMA_VERSION,
     updatedAt: 0,
     habits: [],
     logs: {},
@@ -58,11 +60,17 @@ function normalizeSettings(s) {
   };
 }
 
+// Поля верхнего уровня, которые этот код понимает. Остальные (разделы из будущих версий) сохраняются как есть.
+const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'habits', 'logs', 'abstain', 'notes', 'settings']);
+
 export function normalize(d) {
   const e = emptyData();
-  if (!d || typeof d !== 'object') return e;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return e;
+  d = migrate(d);
   return {
+    ...d,
     version: 1,
+    schemaVersion: Number(d.schemaVersion) || SCHEMA_VERSION,
     updatedAt: Number(d.updatedAt) || 0,
     habits: Array.isArray(d.habits) ? d.habits : [],
     logs: d.logs && typeof d.logs === 'object' ? d.logs : {},
@@ -73,8 +81,9 @@ export function normalize(d) {
 }
 
 // ---------- Журнал отметок ----------
-// Запись дня: { v, t, ev: [{ id, ts, d, s }] }.
-// ev — события (d — изменение значения, s — id этапа, ts — время нажатия).
+// Запись дня: { v, t, ev: [{ id, ts, d, s, k }] }.
+// ev — события (d — изменение значения, s — id этапа, ts — время нажатия, k — вид отметки).
+// Событие хранится целиком: неизвестные поля и значения k из новых версий не теряются при слиянии.
 // Старые записи без ev хранят только v.
 
 /** События записи; старое значение превращается в одно «наследованное» событие. */
@@ -126,8 +135,15 @@ export function merge(a, b) {
   }
   const notes = { ...a.notes };
   for (const [k, n] of Object.entries(b.notes)) if (!notes[k] || (n.t || 0) > (notes[k].t || 0)) notes[k] = n;
+  // неизвестные разделы: целиком от более свежей стороны (их разберёт код той версии, что их создала)
+  const extra = {};
+  for (const src of a.updatedAt > b.updatedAt ? [b, a] : [a, b]) {
+    for (const [k, v] of Object.entries(src)) if (!KNOWN_KEYS.has(k)) extra[k] = v;
+  }
   return {
+    ...extra,
     version: 1,
+    schemaVersion: Math.max(a.schemaVersion, b.schemaVersion),
     updatedAt: Math.max(a.updatedAt, b.updatedAt),
     habits,
     logs,
