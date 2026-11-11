@@ -84,7 +84,8 @@ async function putRemote(env, data, sha) {
 async function syncData(env, clientData) {
   for (let attempt = 0; attempt < 4; attempt++) {
     const remote = await getRemote(env);
-    const merged = merge(remote ? remote.data : {}, clientData || {});
+    // serverNow: метки настроек из будущего (часы устройства спешат) урезаются до времени сервера
+    const merged = merge(remote ? remote.data : {}, clientData || {}, { serverNow: Date.now() });
     if (remote && stableStringify(merge(remote.data, {})) === stableStringify(merged)) return merged;
     const res = await putRemote(env, merged, remote?.sha);
     if (res.ok) return merged;
