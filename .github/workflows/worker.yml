@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['worker/**', 'js/schedule.js', 'js/prayer.js', 'js/logic.js', 'js/store.js', 'js/util.js', 'js/migrate.js']
+    paths: ['worker/**', 'js/schedule.js', 'js/prayer.js', 'js/logic.js', 'js/store.js', 'js/util.js', 'js/migrate.js', 'js/hijri.js', 'js/calibrate.js']
 
 permissions:
   contents: read

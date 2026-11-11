@@ -10,12 +10,14 @@ import * as tg from './tg.js';
 import { WORKER_URL } from './config.js';
 import {
   goalOf, valueOf, progressOf, isDone, isScheduled, firstDay, doneInWeek, scheduleText, goalText,
-  currentStreak, bestStreak, streakText, rateOf, strengthOf, strengthTrend, totalCompletions, dayStats, rangeRate,
+  currentStreak, bestStreak, streakText, rateOf, strengthOf, strengthTrend, forbiddenAt, qadaQueue, tartibHint, tartibCount, totalCompletions, dayStats, rangeRate,
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
+import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
+import { forbiddenWindows } from './logic.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -113,7 +115,12 @@ function viewToday() {
   const habits = habitsActive().filter((h) => firstDay(h) <= day || isToday);
   const due = [];
   const other = [];
-  for (const h of habits) (isScheduled(h, day) ? due : other).push(h);
+  for (const h of habits) {
+    const sch = isScheduled(h, day);
+    // хиджрийское расписание (например, 13–15 числа): в остальные дни привычку не показываем
+    if (!sch && h.schedule?.kind === 'hijri' && !valueOf(h, day)) continue;
+    (sch ? due : other).push(h);
+  }
   const s = dayStats(day);
 
   const strip = Array.from({ length: 7 }, (_, i) => addDays(today(), i - 6))
@@ -159,6 +166,7 @@ function viewToday() {
       <div>
         <button class="eyebrow eyebrow-btn" data-action="pick-date">${esc(fmtDayLong(day))}</button>
         <h1>${isToday ? 'Сегодня' : esc(day.toLocaleDateString('ru-RU', { weekday: 'long' }).replace(/^./, (c) => c.toUpperCase()))}</h1>
+        ${hijriLine(day, isToday)}
       </div>
       <div class="head-actions">
         ${!isToday ? `<button class="pill" data-action="go-today">Сегодня</button>` : ''}
@@ -390,10 +398,45 @@ function choiceSheet({ title, message = '', options }) {
   });
 }
 
+/** Восполнение в запретное время: подсказка и подтверждение (не блокирует). */
+function guardForbidden(action) {
+  const w = forbiddenAt(new Date(), getData().settings);
+  if (!w) return action();
+  confirmSheet({
+    title: 'Сейчас запретное время',
+    message: `Время ${w.name}а — восполнить лучше после ${w.until}. Если время рассчитано неточно, можно отметить сейчас.`,
+    confirm: 'Всё равно отметить',
+    onConfirm: action,
+  });
+}
+
+/** Отметить долг (восполнение) из очереди: по трекеру — этап дня с k='qada', иначе старый долг. */
+function repayItem(it, ts = Date.now()) {
+  if (it.old) addEvent(QADA_LOG, todayKey(), 1, it.p, ts, 'qada');
+  else setStageLog(it.hid, it.day, it.sid, 1, 'qada', ts);
+}
+
+function tartibSheet(hint, h, date, s, { undo }) {
+  const it = hint.item;
+  const what = it.old ? `${QADA_NAMES[it.p]} (старый долг)` : `${QADA_NAMES[it.p]} от ${fmtDateShort(parseKey(it.day))}`;
+  const cur = s.juma ? 'Джума' : s.name;
+  choiceSheet({
+    title: `Сначала восполни ${what}`,
+    message: `Затем читай ${cur}. Это подсказка: порядок восполнения (тартиб) включён в Настройках → Каза.`,
+    options: [
+      { label: 'Восполнил сначала', primary: true, run: () => guardForbidden(() => {
+        repayItem(it, Date.now() - 1000); // долг — раньше текущего намаза
+        markStage(h, date, s, { undo, skipTartib: true });
+      }) },
+      { label: `Отметить только ${cur}`, run: () => markStage(h, date, s, { undo, skipTartib: true }) },
+    ],
+  });
+}
+
 const GENITIVE = { fajr: 'Фаджра', dhuhr: 'Зухра', asr: 'Асра', maghrib: 'Магриба', isha: 'Иши', vitr: 'Витра', juma: 'Джума' };
 
 /** Отметить этап; для намаза — с вопросами про каза и Джума. */
-function markStage(h, date, s, { undo = true } = {}) {
+function markStage(h, date, s, { undo = true, skipTartib = false } = {}) {
   const key = dkey(date);
   const cur = getStageLog(h.id, key, s.id);
   const done = (k, label) => {
@@ -409,13 +452,18 @@ function markStage(h, date, s, { undo = true } = {}) {
     return toast(`Время ${GENITIVE[s.juma ? 'juma' : prayerKeyOf(s)] || 'намаза'} ещё не наступило — ${when}`);
   }
   const expired = isPrayer && stageExpired(date, s);
+  // тартиб: при отметке намаза вовремя — мягкая подсказка, что сначала восполнить
+  if (isPrayer && !expired && !skipTartib) {
+    const hint = tartibHint(qadaDebt(), getData().settings, { day: key, sid: s.id });
+    if (hint) return tartibSheet(hint, h, date, s, { undo });
+  }
   if (expired) {
     const name = s.juma ? 'Джума' : s.name;
     return choiceSheet({
       title: `${name} — время вышло`,
       message: `Время ${s.juma ? 'Зухра' : 'намаза'} закончилось в ${fmtMin(s.end)}${dkey(date) !== todayKey() ? ` (${fmtDateShort(date)})` : ''}. Как отметить?`,
       options: [
-        { label: '🕰️ Каза — восполняю', primary: true, run: () => done('qada', `${s.juma ? 'Зухр' : name}: каза засчитан`) },
+        { label: '🕰️ Каза — восполняю', primary: true, run: () => guardForbidden(() => done('qada', `${s.juma ? 'Зухр' : name}: каза засчитан`)) },
         { label: 'Читал вовремя, просто не отметил', run: () => done('late', `${name} отмечен`) },
       ],
     });
@@ -430,6 +478,18 @@ function markStage(h, date, s, { undo = true } = {}) {
     });
   }
   done('', `${s.name} отмечен`);
+}
+
+/** Хиджрийская дата под заголовком; после Магриба сегодня — пометка «вечер N-го». */
+function hijriLine(day, isToday) {
+  const st = getData().settings;
+  const h = toHijri(day, st);
+  let evening = '';
+  if (isToday) {
+    const at = hijriAt(new Date(), st);
+    if (at.evening) evening = ` <span class="hijri-eve">· вечер ${at.d}-го</span>`;
+  }
+  return `<div class="hijri-line">${esc(formatHijri(h))}${evening}</div>`;
 }
 
 function habitCard(h, day) {
@@ -494,7 +554,7 @@ function stagedCard(h, day) {
   }
   if (isNamazHabit(h) && dkey(day) === todayKey()) {
     const debt = qadaDebt().total;
-    if (debt) sub.push(`<span class="debt">каза ${debt}</span>`);
+    if (debt) sub.push(`<span class="debt">долг ${debt}</span>`);
   }
   void ctx;
 
@@ -675,7 +735,7 @@ function openHabitDetail(id) {
           if (s) markStage(h, state.day, s, { undo: false });
         }
       }));
-      api.el.querySelectorAll('[data-repay]').forEach((b) => (b.onclick = () => repayQada(b.dataset.repay)));
+      mountQadaCard(api.el);
       q('archive').onclick = () => {
         upsertHabit({ id, archived: !h.archived });
         if (!h.archived) {
@@ -715,7 +775,7 @@ function stageEditor(h, day) {
       ontime: `${kindLabel}отмечено в ${at}`,
       late: `${kindLabel}вовремя, отмечено в ${at}`,
       qada: `каза · восполнено в ${at}`,
-      missed: h.ibadah ? `не отмечено (${window_}) · можно восполнить` : `пропущен (${window_}) · долг каза`,
+      missed: `не отмечено (${window_}) · долг, можно восполнить`,
     }[status] || (ok && at ? `отмечено в ${at}` : window_);
     const range = s.max && s.max !== s.min ? `${s.min}–${s.max}` : `${s.min}`;
     const control = h.type === 'count'
@@ -728,39 +788,80 @@ function stageEditor(h, day) {
 // ---------- Каза ----------
 
 function repayQada(p) {
-  const debt = qadaDebt();
-  const b = debt.byPrayer[p];
+  const b = qadaDebt().byPrayer[p];
   if (!b || !b.total) return;
-  haptic(20);
-  if (b.missed.length) {
-    // сначала закрываем самый старый пропуск по трекеру
-    const m = b.missed[0];
-    setStageLog(m.hid, m.day, m.sid, 1, 'qada');
-    return toast(`${QADA_NAMES[p]} за ${fmtDateShort(parseKey(m.day))}: каза засчитан`, { action: 'Отменить', onAction: () => setStageLog(m.hid, m.day, m.sid, 0) });
-  }
-  addEvent(QADA_LOG, todayKey(), 1, p, Date.now(), 'qada');
-  toast(`${QADA_NAMES[p]}: −1 из старого долга`, { action: 'Отменить', onAction: () => addEvent(QADA_LOG, todayKey(), -1, p) });
+  // сначала самый старый пропуск по трекеру, затем старый долг
+  const it = b.missed.length ? { ...b.missed[0], p } : { p, old: true };
+  guardForbidden(() => doRepay(it));
 }
 
+function doRepay(it) {
+  haptic(20);
+  repayItem(it);
+  if (it.old) return toast(`${QADA_NAMES[it.p]}: −1 из старого долга`, { action: 'Отменить', onAction: () => addEvent(QADA_LOG, todayKey(), -1, it.p) });
+  toast(`${QADA_NAMES[it.p]} за ${fmtDateShort(parseKey(it.day))}: восполнено`, { action: 'Отменить', onAction: () => setStageLog(it.hid, it.day, it.sid, 0) });
+}
+
+function repayNext() {
+  const q = qadaQueue(qadaDebt());
+  if (q[0]) guardForbidden(() => doRepay(q[0]));
+}
+
+const TARTIB_ASK = 'Есть ли у тебя старые пропущенные намазы? Если нет и пропусков меньше шести — порядок восполнения обязателен по ханафитскому мазхабу, уточни у имама.';
+
 function qadaCard() {
+  const st = getData().settings;
   const d = qadaDebt();
   const goal = d.perDay;
-  const rows = QADA_KEYS.filter((k) => d.byPrayer[k].total).map((k) => {
-    const b = d.byPrayer[k];
-    const parts = [];
-    if (b.missed.length) parts.push(`по трекеру ${b.missed.length}`);
-    if (b.oldLeft) parts.push(`старый долг ${b.oldLeft}`);
-    return `<div class="row static"><div class="row-main"><b>${QADA_NAMES[k]} · ${b.total}</b><span class="muted">${parts.join(' · ')}</span></div><button class="pill qada-pill" data-repay="${k}">+ Восполнил</button></div>`;
-  }).join('');
+  const tartib = st.tartib || {};
+  const fw = forbiddenAt(new Date(), st);
+  const forbidHint = fw && d.total ? `<p class="hint forbid-hint">Сейчас запретное время (${fw.name}) — восполнить после ${fw.until}.</p>` : '';
+  const ask = !tartib.asked ? `<div class="card pad tartib-ask"><p>${TARTIB_ASK}</p><div class="calib-actions"><button class="btn btn-primary" data-tartib-ask="on">Включить порядок</button><button class="btn btn-secondary" data-tartib-ask="off">Не сейчас</button></div></div>` : '';
+  const typeLabel = (k) => (d.byPrayer[k].type === 'wajib' ? ' · ваджиб' : '');
+  let body = '';
+  if (tartib.enabled) {
+    const queue = qadaQueue(d);
+    const n = tartibCount(d, st);
+    const active = n > 0 && n < (Number(tartib.limit) || 6);
+    const list = queue.slice(0, 8).map((it, i) => `<div class="row static"><span class="queue-n">${i + 1}</span><div class="row-main"><b>${QADA_NAMES[it.p]}${typeLabel(it.p)}</b><span class="muted">${fmtDateShort(parseKey(it.day))}</span></div></div>`).join('');
+    const old = QADA_KEYS.filter((k) => d.byPrayer[k].oldLeft).map((k) => `<div class="row static"><div class="row-main"><b>${QADA_NAMES[k]}${typeLabel(k)} · ${d.byPrayer[k].oldLeft}</b><span class="muted">старый долг</span></div><button class="pill qada-pill" data-repay-old="${k}">+ Восполнил</button></div>`).join('');
+    body = `${queue.length ? `<div class="card list-group"><div class="row static"><div class="row-main"><b>Порядок восполнения</b><span class="muted">${active ? 'тартиб: сначала самый ранний долг' : `долгов ${n} — порядок не обязателен (порог ${Number(tartib.limit) || 6})`}</span></div></div>${list}${queue.length > 8 ? `<div class="row static"><span class="muted">и ещё ${queue.length - 8}</span></div>` : ''}</div>
+      <button class="btn btn-block btn-primary mt" data-repay-next>Восполнить: ${QADA_NAMES[queue[0].p]} · ${fmtDateShort(parseKey(queue[0].day))}</button>` : ''}
+      ${old ? `<div class="card list-group mt">${old}</div>` : ''}`;
+  } else {
+    const rows = QADA_KEYS.filter((k) => d.byPrayer[k].total).map((k) => {
+      const b = d.byPrayer[k];
+      const parts = [];
+      if (b.missed.length) parts.push(`по трекеру ${b.missed.length}`);
+      if (b.oldLeft) parts.push(`старый долг ${b.oldLeft}`);
+      return `<div class="row static"><div class="row-main"><b>${QADA_NAMES[k]}${typeLabel(k)} · ${b.total}</b><span class="muted">${parts.join(' · ')}</span></div><button class="pill qada-pill" data-repay="${k}">+ Восполнил</button></div>`;
+    }).join('');
+    body = `<div class="card list-group">${rows}</div>`;
+  }
   let forecast = '';
   if (d.oldLeft && goal) {
     const days = Math.ceil(d.oldLeft / goal);
     forecast = `При ${goal} в день старый долг будет восполнен примерно к ${fmtDateShort(addDays(today(), days))} (${days} ${plural(days, DAY_FORMS)}).`;
   }
-  return `<div class="group-title">Каза${d.total ? ` · долг ${d.total}` : ''}</div>
-    ${d.total ? `<div class="card list-group">${rows}</div>` : `<div class="card pad"><p class="hint first center">Долгов каза нет — ма шаа Аллах 🤲</p></div>`}
+  const head = d.total ? ` · долг ${d.total}${d.totalWajib ? ` (фард ${d.totalFard}, ваджиб ${d.totalWajib})` : ''}` : '';
+  return `<div class="group-title">Каза${head}</div>
+    ${ask}
+    ${d.total ? `${forbidHint}${body}` : `<div class="card pad"><p class="hint first center">Долгов нет — ма шаа Аллах 🤲</p></div>`}
     ${goal && d.oldLeft ? `<div class="card pad qada-goal"><div class="milestone-row"><span>Сегодня восполнено</span><span><b>${d.repaidToday}</b> из ${goal}</span></div><div class="progress" style="--c:var(--orange)"><div style="width:${Math.min(100, Math.round((d.repaidToday / goal) * 100))}%"></div></div>${forecast ? `<p class="hint">${forecast}</p>` : ''}</div>` : ''}
-    <p class="hint">Пропущенные по трекеру намазы появляются здесь автоматически. Старые долги и цель в день — в Настройках → Время намаза.</p>`;
+    <p class="hint">Намазы, не отмеченные вовремя, появляются здесь автоматически. Старые долги, цель в день, запретное время и порядок восполнения — в Настройках → Время намаза.</p>`;
+}
+
+function mountQadaCard(el) {
+  el.querySelectorAll('[data-repay]').forEach((b) => (b.onclick = () => repayQada(b.dataset.repay)));
+  el.querySelectorAll('[data-repay-old]').forEach((b) => (b.onclick = () => guardForbidden(() => doRepay({ p: b.dataset.repayOld, old: true }))));
+  const next = el.querySelector('[data-repay-next]');
+  if (next) next.onclick = () => repayNext();
+  el.querySelectorAll('[data-tartib-ask]').forEach((b) => (b.onclick = () => {
+    update((d) => {
+      d.settings.tartib = { ...(d.settings.tartib || {}), asked: true, ...(b.dataset.tartibAsk === 'on' ? { enabled: true } : {}) };
+      d.settings.updatedAt = Date.now();
+    });
+  }));
 }
 
 function namazStatsCard(h) {
@@ -772,7 +873,7 @@ function namazStatsCard(h) {
     <div class="tiles">
       <div class="tile"><div class="tile-label">Вовремя</div><div class="tile-val" style="color:var(--green)">${pctOf(s.ontime + s.late)}</div></div>
       <div class="tile"><div class="tile-label">Каза</div><div class="tile-val" style="color:var(--orange)">${s.qada}</div></div>
-      <div class="tile"><div class="tile-label">${h.ibadah ? 'Не отмечено' : 'Пропущено'}</div><div class="tile-val" style="color:${s.missed && !h.ibadah ? 'var(--red)' : 'inherit'}">${s.missed}</div></div>
+      <div class="tile"><div class="tile-label">Не отмечено</div><div class="tile-val">${s.missed}</div></div>
       <div class="tile"><div class="tile-label">Джума</div><div class="tile-val">${s.juma}<small> из ${s.fridays}</small></div></div>
     </div>
     ${s.late ? `<p class="hint">Отмечено с опозданием (но прочитано вовремя): ${s.late}.</p>` : ''}`;
@@ -805,6 +906,7 @@ function openHabitEditor(existing) {
     ? JSON.parse(JSON.stringify(existing))
     : { name: '', emoji: '💧', color: COLORS[7], type: 'check', target: 8, unit: '', step: 1, schedule: { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3 } };
   f.schedule = { kind: 'daily', days: [1, 2, 3, 4, 5], times: 3, ...(f.schedule || {}) };
+  f.schedule.hijri = { type: 'days', days: [13, 14, 15], m: 9, d: 1, from: 21, to: -1, ...(f.schedule.hijri || {}) };
   if (f.type === 'timer' && !existing) f.target = 30;
   f.stages = Array.isArray(f.stages) ? f.stages : [];
   f.useStages = f.stages.length > 0;
@@ -850,7 +952,8 @@ function openHabitEditor(existing) {
 
         <div class="group-title">Расписание</div>
         <div class="card pad">
-          ${segmented('sched', [{ value: 'daily', label: 'Каждый день' }, { value: 'weekdays', label: 'Дни недели' }, { value: 'perWeek', label: 'N в неделю' }], f.schedule.kind)}
+          ${segmented('sched', [{ value: 'daily', label: 'Каждый день' }, { value: 'weekdays', label: 'Дни недели' }, { value: 'perWeek', label: 'N в неделю' }, { value: 'hijri', label: 'Хиджра' }], f.schedule.kind)}
+          ${f.schedule.kind === 'hijri' ? hijriRuleEditor(f) : ''}
           ${f.schedule.kind === 'weekdays' ? `<div class="chips">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="chip ${f.schedule.days.includes(d) ? 'is-active' : ''}" style="--c:${f.color}" data-wd="${d}">${WEEKDAYS_SHORT[d]}</button>`).join('')}</div>` : ''}
           ${f.schedule.kind === 'perWeek' ? `<div class="inline-stepper"><button class="round-btn sm" data-e="tm">${icon.minus(16)}</button><span><b>${f.schedule.times}</b> ${plural(f.schedule.times, ['раз', 'раза', 'раз'])} в неделю</span><button class="round-btn sm" data-e="tp">${icon.plus(16)}</button></div>` : ''}
         </div>
@@ -896,6 +999,7 @@ function openHabitEditor(existing) {
         if (s.size) f.schedule.days = [...s];
         api.refresh();
       }));
+      mountHijriRuleEditor(el, f, api);
       mountStagesSection(el, f, api);
       if (q('tm')) q('tm').onclick = () => ((f.schedule.times = clamp(f.schedule.times - 1, 1, 6)), api.refresh());
       if (q('tp')) q('tp').onclick = () => ((f.schedule.times = clamp(f.schedule.times + 1, 1, 6)), api.refresh());
@@ -909,7 +1013,7 @@ function openHabitEditor(existing) {
           target: f.type === 'check' ? 1 : Math.max(f.type === 'timer' ? 1 : 0.1, Number(String(f.target).replace(',', '.')) || 1),
           unit: f.type === 'count' ? String(f.unit || '').trim() : '',
           step: f.type === 'count' ? Math.max(0.1, Number(String(f.step).replace(',', '.')) || 1) : 1,
-          schedule: { kind: f.schedule.kind, days: [...f.schedule.days].sort(), times: f.schedule.times },
+          schedule: { kind: f.schedule.kind, days: [...f.schedule.days].sort(), times: f.schedule.times, ...(f.schedule.kind === 'hijri' ? { hijri: cleanHijriRule(f.schedule.hijri) } : {}) },
           stages: f.type !== 'timer' && f.useStages ? f.stages.filter((x) => x.name.trim()).map((x) => ({
             id: x.id || uid(),
             role: x.role,
@@ -930,6 +1034,68 @@ function openHabitEditor(existing) {
       };
       if (isNew && !f.name) setTimeout(() => q('name')?.focus(), 320);
     },
+  });
+}
+
+// ---------- Хиджрийское расписание в редакторе ----------
+
+const monthSelect = (attr, m) => `<select class="field" ${attr}>${HIJRI_MONTHS.map((n, i) => `<option value="${i + 1}" ${+m === i + 1 ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+
+function hijriRuleEditor(f) {
+  const r = f.schedule.hijri;
+  const last = +r.from < 0 && +r.to === -1;
+  let body = '';
+  if (r.type === 'days') {
+    body = `<div class="chips hijri-days">${Array.from({ length: 30 }, (_, i) => i + 1).map((d) => `<button class="chip ${r.days.includes(d) ? 'is-active' : ''}" style="--c:${f.color}" data-hd="${d}">${d}</button>`).join('')}</div>
+      <p class="hint">Например, 13, 14, 15 — «белые дни». 30-е число бывает не в каждом месяце.</p>`;
+  } else if (r.type === 'date') {
+    body = `<div class="form-grid"><label><span>Месяц</span>${monthSelect('data-hm', r.m)}</label><label><span>Число</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hdd value="${esc(r.d)}"></label></div>`;
+  } else if (r.type === 'range') {
+    body = `<div class="form-grid"><label><span>Месяц</span>${monthSelect('data-hm', r.m)}</label></div>
+      <label class="switch-row mt"><span>Последние дни месяца</span><input type="checkbox" class="switch" data-hlast ${last ? 'checked' : ''}></label>
+      ${last
+        ? `<div class="form-grid"><label><span>Сколько последних дней</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hn value="${-r.from}"></label></div>`
+        : `<div class="form-grid"><label><span>С числа</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hfrom value="${Math.max(1, +r.from || 1)}"></label><label><span>По число</span><input class="field" type="number" min="1" max="30" inputmode="numeric" data-hto value="${+r.to > 0 ? r.to : 30}"></label></div>`}`;
+  } else {
+    body = `<div class="form-grid"><label><span>Месяц</span>${monthSelect('data-hm', r.m)}</label></div>`;
+  }
+  return `<div class="mt">${segmented('hrule', [{ value: 'days', label: 'Числа' }, { value: 'date', label: 'Дата' }, { value: 'range', label: 'Диапазон' }, { value: 'month', label: 'Месяц' }], r.type)}</div>
+    <div class="mt">${body}</div>
+    <p class="hint">Даты по хиджрийскому календарю (Умм аль-Кура) со сдвигами УМУ из Настроек.</p>`;
+}
+
+function cleanHijriRule(r) {
+  const n = (x, lo, hi) => clamp(Math.round(Number(x) || lo), lo, hi);
+  if (r.type === 'days') return { type: 'days', days: [...new Set(r.days.map(Number))].sort((a, b) => a - b) };
+  if (r.type === 'date') return { type: 'date', m: n(r.m, 1, 12), d: n(r.d, 1, 30) };
+  if (r.type === 'range') {
+    if (+r.from < 0) return { type: 'range', m: n(r.m, 1, 12), from: -n(-r.from, 1, 30), to: -1 };
+    const from = n(r.from, 1, 30);
+    return { type: 'range', m: n(r.m, 1, 12), from, to: Math.max(from, n(r.to, 1, 30)) };
+  }
+  return { type: 'month', m: n(r.m, 1, 12) };
+}
+
+function mountHijriRuleEditor(el, f, api) {
+  const r = f.schedule.hijri;
+  el.querySelectorAll('[data-seg=hrule] button').forEach((b) => (b.onclick = () => ((r.type = b.dataset.value), api.refresh())));
+  el.querySelectorAll('[data-hd]').forEach((b) => (b.onclick = () => {
+    const d = Number(b.dataset.hd);
+    const s = new Set(r.days);
+    s.has(d) ? s.delete(d) : s.add(d);
+    if (s.size) r.days = [...s].sort((a, b) => a - b);
+    api.refresh();
+  }));
+  const on = (sel, fn) => { const x = el.querySelector(sel); if (x) x.onchange = () => fn(x); };
+  on('[data-hm]', (x) => (r.m = Number(x.value)));
+  on('[data-hdd]', (x) => (r.d = Number(x.value)));
+  on('[data-hn]', (x) => ((r.from = -Math.max(1, Number(x.value) || 10)), (r.to = -1)));
+  on('[data-hfrom]', (x) => (r.from = Number(x.value)));
+  on('[data-hto]', (x) => (r.to = Number(x.value)));
+  on('[data-hlast]', (x) => {
+    if (x.checked) Object.assign(r, { from: -10, to: -1 });
+    else Object.assign(r, { from: 21, to: 30 });
+    api.refresh();
   });
 }
 
@@ -1426,6 +1592,7 @@ function viewSettings() {
     ${notificationsSection()}
     ${routineSection()}
     ${prayerSection()}
+    ${hijriSection()}
 
     <div class="group-title">Оформление</div>
     <div class="card pad">${segmented('theme', [{ value: 'system', label: 'Как в системе' }, { value: 'light', label: 'Светлая' }, { value: 'dark', label: 'Тёмная' }], theme)}</div>
@@ -1514,6 +1681,85 @@ function prayerSection() {
     </div>
     ${jumaSection()}
     ${qadaSettingsSection()}`;
+}
+
+// ---------- Хиджрийский календарь ----------
+
+function hijriSection() {
+  const st = getData().settings;
+  const offs = [...(st.hijri?.offsets || [])].sort((a, b) => a.y - b.y || a.m - b.m);
+  const now = hijriAt(new Date(), st);
+  return `
+    <div class="group-title">Хиджрийский календарь</div>
+    <div class="card pad">
+      <div class="hijri-today"><b>${esc(formatHijri(toHijri(today(), st)))}</b>${now.evening ? `<span class="muted"> · после Магриба — ${now.d} ${esc(HIJRI_MONTHS[now.m - 1])}</span>` : ''}</div>
+      <p class="hint">Расчёт: Умм аль-Кура (${hijriEngine() === 'intl' ? 'встроенный календарь устройства' : 'встроенная таблица'}). Если УМУ объявило начало месяца на день раньше или позже — добавь сдвиг.</p>
+      ${offs.length ? `<div class="list-group mt">${offs.map((o) => `<div class="row static"><div class="row-main"><b>${esc(HIJRI_MONTHS[o.m - 1])} ${o.y}</b><span class="muted">сдвиг ${o.offset > 0 ? '+' : ''}${o.offset} ${plural(Math.abs(o.offset), DAY_FORMS)}</span></div><button class="icon-btn sm danger" data-hoff-del="${o.y}-${o.m}" aria-label="Удалить">${icon.close(16)}</button></div>`).join('')}</div>` : ''}
+      <button class="btn btn-secondary mt" data-hoff-add>${icon.plus(16)} Добавить сдвиг</button>
+    </div>`;
+}
+
+function openHijriOffsetEditor() {
+  const st = getData().settings;
+  const cur = toHijri(today(), st);
+  const f = { y: cur.y, m: cur.m, offset: 1 };
+  openSheet({
+    className: 'sheet-compact',
+    render: () => `
+      <header class="sheet-header"><button class="link-btn" data-e="cancel">Отмена</button><strong>Сдвиг месяца</strong><button class="link-btn strong" data-e="save">Готово</button></header>
+      <div class="sheet-body">
+        <div class="card pad">
+          <div class="form-grid">
+            <label><span>Месяц</span>${monthSelect('data-e="m"', f.m)}</label>
+            <label><span>Год (хиджра)</span><input class="field" type="number" inputmode="numeric" data-e="y" value="${f.y}"></label>
+          </div>
+          <div class="mt">${segmented('hoff', [-2, -1, 1, 2].map((v) => ({ value: String(v), label: `${v > 0 ? '+' : ''}${v} ${plural(Math.abs(v), DAY_FORMS)}` })), String(f.offset))}</div>
+          <p class="hint">По объявлению УМУ (наблюдение луны). +1 — месяц начался на день позже расчётного.</p>
+          ${offsetWarning(f)}
+        </div>
+      </div>`,
+    mount: (api) => {
+      const q = (k) => api.el.querySelector(`[data-e=${k}]`);
+      q('cancel').onclick = () => api.close();
+      q('m').onchange = (e) => (f.m = Number(e.target.value));
+      q('y').onchange = (e) => (f.y = Number(e.target.value) || f.y);
+      api.el.querySelectorAll('[data-seg=hoff] button').forEach((b) => (b.onclick = () => ((f.offset = Number(b.dataset.value)), api.refresh())));
+      q('save').onclick = () => {
+        const offset = clamp(f.offset, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX);
+        update((d) => {
+          const list = (d.settings.hijri?.offsets || []).filter((o) => !(o.y === f.y && o.m === f.m));
+          if (offset) list.push({ y: f.y, m: f.m, offset });
+          d.settings.hijri = { ...(d.settings.hijri || {}), offsets: list };
+          d.settings.updatedAt = Date.now();
+        });
+        api.close();
+        toast(`${HIJRI_MONTHS[f.m - 1]} ${f.y}: сдвиг ${offset > 0 ? '+' : ''}${offset}`);
+      };
+    },
+  });
+}
+
+/** Предупредить, если со сдвигом месяц получится не 29–30 дней (вероятно, сдвиг не тот). */
+function offsetWarning(f) {
+  const st = getData().settings;
+  const others = (st.hijri?.offsets || []).filter((o) => !(o.y === f.y && o.m === f.m));
+  const test = { ...st, hijri: { offsets: [...others, { y: f.y, m: f.m, offset: f.offset }] } };
+  const py = f.m === 1 ? f.y - 1 : f.y;
+  const pm = f.m === 1 ? 12 : f.m - 1;
+  const bad = [[py, pm], [f.y, f.m]].map(([y, m]) => [y, m, monthLength(y, m, test)]).filter(([, , n]) => n < 29 || n > 30);
+  return bad.length ? `<p class="calib-warn">⚠ Тогда ${bad.map(([y, m, n]) => `${HIJRI_MONTHS[m - 1]} ${y} будет ${n} ${plural(n, DAY_FORMS)}`).join(', ')} — проверь объявление.</p>` : '';
+}
+
+function mountHijri() {
+  const add = view.querySelector('[data-hoff-add]');
+  if (add) add.onclick = () => openHijriOffsetEditor();
+  view.querySelectorAll('[data-hoff-del]').forEach((b) => (b.onclick = () => {
+    const [y, m] = b.dataset.hoffDel.split('-').map(Number);
+    update((d) => {
+      d.settings.hijri = { ...(d.settings.hijri || {}), offsets: (d.settings.hijri?.offsets || []).filter((o) => !(o.y === y && o.m === m)) };
+      d.settings.updatedAt = Date.now();
+    });
+  }));
 }
 
 // ---------- Сверка времени намаза с расписанием ----------
@@ -1660,7 +1906,8 @@ function jumaSection() {
 }
 
 function qadaSettingsSection() {
-  const q = getData().settings.qada;
+  const st = getData().settings;
+  const q = st.qada;
   const d = qadaDebt();
   return `
     <div class="group-title">Старые долги каза</div>
@@ -1674,7 +1921,24 @@ function qadaSettingsSection() {
       <div class="qada-grid">${QADA_KEYS.map((k) => `<label><span>${QADA_NAMES[k]}</span><input class="field" type="number" min="0" inputmode="numeric" data-set="qada.old.${k}" data-num value="${Number(q.old?.[k]) || 0}"></label>`).join('')}</div>
       <label class="switch-row mt"><span>Цель: восполнять в день</span>
         <select class="field compact" data-set="qada.perDay" data-num>${[0, 1, 2, 3, 4, 5, 6, 10].map((n) => `<option value="${n}" ${Number(q.perDay) === n ? 'selected' : ''}>${n ? `${n} ${plural(n, ['намаз', 'намаза', 'намазов'])}` : 'без цели'}</option>`).join('')}</select></label>
-      <p class="hint">Калькулятор считает по одному намазу каждого вида за каждый день (включая Витр), дальше любое число можно поправить. Осталось восполнить из старого долга: <b>${d.oldLeft}</b>.</p>
+      <p class="hint">Калькулятор считает по одному намазу каждого вида за каждый день, включая Витр (ваджиб), дальше любое число можно поправить. Осталось восполнить из старого долга: <b>${d.oldLeft}</b>.</p>
+    </div>
+    <div class="group-title">Запретное время</div>
+    <div class="card pad">
+      <div class="form-grid three">
+        <label><span>После восхода</span><input class="field" type="number" min="0" max="60" inputmode="numeric" data-set="forbidden.sunrise" data-num value="${Number(st.forbidden?.sunrise) || 0}"></label>
+        <label><span>До Зухра</span><input class="field" type="number" min="0" max="60" inputmode="numeric" data-set="forbidden.zenith" data-num value="${Number(st.forbidden?.zenith) || 0}"></label>
+        <label><span>До Магриба</span><input class="field" type="number" min="0" max="60" inputmode="numeric" data-set="forbidden.sunset" data-num value="${Number(st.forbidden?.sunset) || 0}"></label>
+      </div>
+      <p class="hint">Минуты, когда приложение не предлагает восполнять каза. Сверь у имама. Сегодня: ${forbiddenWindows(today(), st).map((w) => `${w.name} ${fmtMin(w.from)}–${w.until}`).join(', ')}.</p>
+    </div>
+    <div class="group-title">Порядок восполнения</div>
+    <div class="card pad">
+      <label class="switch-row"><span><b>Соблюдать порядок (сахиб ат-тартиб)</b><br><span class="muted small">Включай после консультации с имамом</span></span><input type="checkbox" class="switch" data-set-bool="tartib.enabled" ${st.tartib?.enabled ? 'checked' : ''}></label>
+      ${st.tartib?.enabled ? `
+      <label class="switch-row mt"><span>Учитывать старые долги<br><span class="muted small">Из калькулятора выше</span></span><input type="checkbox" class="switch" data-set-bool="tartib.countOld" ${st.tartib?.countOld ? 'checked' : ''}></label>
+      <label class="switch-row mt"><span>Учитывать Витр</span><input type="checkbox" class="switch" data-set-bool="tartib.countVitr" ${st.tartib?.countVitr !== false ? 'checked' : ''}></label>
+      <p class="hint">Пока долгов меньше ${Number(st.tartib?.limit) || 6}, при отметке намаза приложение подскажет сначала восполнить самый ранний. Ничего не блокируется.</p>` : ''}
     </div>`;
 }
 
@@ -1690,6 +1954,7 @@ function mountPrefs() {
     setSetting(`prayer.adj.${k}`, (getData().settings.prayer.adj?.[k] || 0) + Number(b.dataset.delta));
   }));
   mountCalibration();
+  mountHijri();
   view.querySelectorAll('[data-seg=asr] button').forEach((b) => (b.onclick = () => setSetting('prayer.asr', b.dataset.value)));
   const calc = view.querySelector('#qada-calc');
   if (calc) calc.onclick = () => {
@@ -1818,6 +2083,7 @@ sync.onStatus(() => {
 function migrateNamaz() {
   const tk = todayKey();
   if (!getData().settings.qada?.since) setSetting('qada.since', tk);
+  if (!getData().settings.qada?.vitrSince) setSetting('qada.vitrSince', tk);
   for (const h of habitsActive().filter(isNamazHabit)) {
     if (h.stages.some((x) => x.role === 'vitr')) continue;
     upsertHabit({ id: h.id, stages: [...h.stages, { ...VITR_STAGE(), since: tk }] });

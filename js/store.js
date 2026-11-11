@@ -28,7 +28,12 @@ export function defaultSettings() {
     },
     push: { workerUrl: '' },
     juma: { enabled: true, time: '13:00', lead: 45 },
-    qada: { since: '', perDay: 2, old: { fajr: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0, vitr: 0 } },
+    qada: { since: '', vitrSince: '', perDay: 2, old: { fajr: 0, dhuhr: 0, asr: 0, maghrib: 0, isha: 0, vitr: 0 } },
+    hijri: { offsets: [] }, // сдвиги месяцев по объявлению УМУ: [{ y, m, offset }]
+    // запретное время для восполнения (минуты): после восхода, до Зухра (зенит), до Магриба (закат)
+    forbidden: { sunrise: 15, zenith: 10, sunset: 15 },
+    // порядок восполнения (сахиб ат-тартиб); limit/countVitr — уточняются у имама
+    tartib: { enabled: false, limit: 6, countOld: false, countVitr: true, asked: false },
   };
 }
 
@@ -57,6 +62,9 @@ function normalizeSettings(s) {
     push: { ...d.push, ...(s.push || {}) },
     juma: { ...d.juma, ...(s.juma || {}) },
     qada: { ...d.qada, ...(s.qada || {}), old: { ...d.qada.old, ...(s.qada?.old || {}) } },
+    hijri: { ...d.hijri, ...(s.hijri || {}), offsets: Array.isArray(s.hijri?.offsets) ? s.hijri.offsets : [] },
+    forbidden: { ...d.forbidden, ...(s.forbidden || {}) },
+    tartib: { ...d.tartib, ...(s.tartib || {}) },
   };
 }
 
@@ -259,8 +267,8 @@ export function setLog(hid, day, v) {
 }
 
 /** Установить значение этапа. */
-export function setStageLog(hid, day, sid, v, k = '') {
-  addEvent(hid, day, Math.max(0, v) - getStageLog(hid, day, sid), sid, Date.now(), k);
+export function setStageLog(hid, day, sid, v, k = '', ts = Date.now()) {
+  addEvent(hid, day, Math.max(0, v) - getStageLog(hid, day, sid), sid, ts, k);
 }
 
 /** Ключ журнала восполнения старых долгов каза. */

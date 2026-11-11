@@ -1,6 +1,6 @@
 // Версия схемы, миграции и совместимость слияния между старым и новым кодом.
 import assert from 'node:assert/strict';
-import { migrate, SCHEMA_VERSION } from '../js/migrate.js';
+import { migrate, SCHEMA_VERSION, VITR_DEBT_RELEASE } from '../js/migrate.js';
 import { merge, normalize, defaultSettings } from '../js/store.js';
 import { typicalData } from './fixtures.mjs';
 
@@ -12,6 +12,8 @@ const strip = (d) => {
 // 1. Данные без schemaVersion → v1 без потерь
 {
   const old = typicalData();
+  delete old.settings.tartib; // данные, созданные до v3
+  delete old.settings.qada.vitrSince;
   old.logs = { namaz: { '2026-11-10': { ev: [{ id: 'a', ts: 1, d: 1, s: 'p-fajr', k: 'qada' }], t: 1, v: 1 } }, gym: { '2026-01-01': { v: 1, t: 5 } } };
   old.notes = { '2026-11-10': { text: 'день', t: 3 } };
   const snapshot = JSON.stringify(old);
@@ -20,12 +22,17 @@ const strip = (d) => {
   assert.equal(JSON.stringify(old), snapshot, 'исходный объект не изменён');
   const expected = JSON.parse(snapshot);
   expected.habits = expected.habits.map((h) => (h.id === 'namaz' ? { ...h, ibadah: true } : h)); // шаг v2
+  // шаг v3: долг Витра с даты релиза, тартиб у существующего аккаунта с намазами
+  expected.settings = { ...expected.settings, qada: { ...expected.settings.qada, vitrSince: VITR_DEBT_RELEASE }, tartib: { enabled: true, asked: true } };
   assert.deepEqual(strip(m), expected, 'кроме schemaVersion и ibadah у Намаза всё на месте');
   const n = normalize(old);
   assert.equal(n.schemaVersion, SCHEMA_VERSION);
   for (const k of ['logs', 'abstain', 'notes']) assert.deepEqual(n[k], old[k], `${k} без изменений`);
   assert.deepEqual(n.habits, expected.habits);
-  assert.deepEqual(n.settings, { ...defaultSettings(), ...old.settings, qada: { ...defaultSettings().qada, ...old.settings.qada } });
+  const D = defaultSettings();
+  assert.deepEqual(n.settings, { ...D, ...old.settings, qada: { ...D.qada, ...old.settings.qada, vitrSince: VITR_DEBT_RELEASE }, tartib: { ...D.tartib, enabled: true, asked: true } });
+  assert.equal(normalize({}).settings.tartib.enabled, false, 'новый пользователь: тартиб выключен');
+  assert.equal(normalize({ habits: [{ id: 'w', stages: [{ id: 's', time: { mode: 'fixed', at: '08:00' } }] }] }).settings.tartib.enabled, false, 'без намазов — выключен');
   assert.deepEqual(migrate(m), m, 'идемпотентно');
   assert.equal(migrate(m), m, 'актуальная версия не копируется');
   console.log('✓ данные без schemaVersion → актуальная версия без потерь, миграция идемпотентна');
