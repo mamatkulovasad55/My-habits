@@ -10,7 +10,7 @@ import * as tg from './tg.js';
 import { WORKER_URL } from './config.js';
 import {
   goalOf, valueOf, progressOf, isDone, isScheduled, firstDay, doneInWeek, scheduleText, goalText,
-  currentStreak, bestStreak, streakText, rateOf, totalCompletions, dayStats, rangeRate,
+  currentStreak, bestStreak, streakText, rateOf, strengthOf, strengthTrend, totalCompletions, dayStats, rangeRate,
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
@@ -359,8 +359,15 @@ function tapStage(h, day) {
 
 const STATUS_CLASS = { ontime: 'is-done', late: 'is-done', qada: 'is-qada', missed: 'is-missed' };
 
+/** Плашка «Сила N» для привычек-ибадата (вместо серии). */
+function strengthChip(h) {
+  const v = strengthOf(h);
+  return `<span class="strength" style="--c:${h.color}"><i style="--p:${v}"></i>Сила ${v}</span>`;
+}
+const trendText = (d) => (d > 0 ? `+${d} за месяц` : d < 0 ? `−${-d} за месяц` : 'без изменений за месяц');
+
 function stageDots(h, day) {
-  return `<span class="stage-dots">${stagesForDay(h, day)
+  return `<span class="stage-dots ${h.ibadah ? 'is-soft' : ''}">${stagesForDay(h, day)
     .map((s) => `<i class="${STATUS_CLASS[stageStatus(h, day, s)] || ''}" title="${esc(s.name)}"></i>`)
     .join('')}</span>`;
 }
@@ -437,8 +444,11 @@ function habitCard(h, day) {
   if (h.type === 'count') sub.push(`${fmtNum(v)} / ${h.target} ${esc(h.unit || '')}`.trim());
   if (h.type === 'timer') sub.push(`<span data-live-timer="${h.id}">${fmtClock(v)}</span> / ${h.target} мин`);
   if (h.schedule?.kind === 'perWeek') sub.push(`${doneInWeek(h, day)}/${h.schedule.times} за неделю`);
-  const st = currentStreak(h);
-  if (st.value > 0) sub.push(`<span class="streak">${icon.flame(13)} ${streakText(st)}</span>`);
+  if (h.ibadah) sub.push(strengthChip(h));
+  else {
+    const st = currentStreak(h);
+    if (st.value > 0) sub.push(`<span class="streak">${icon.flame(13)} ${streakText(st)}</span>`);
+  }
   if (!sub.length) sub.push(esc(scheduleText(h)));
 
   let action;
@@ -477,8 +487,11 @@ function stagedCard(h, day) {
   } else if (!done) {
     sub.push('все этапы отмечены');
   }
-  const cs = currentStreak(h);
-  if (cs.value > 0) sub.push(`<span class="streak">${icon.flame(13)} ${streakText(cs)}</span>`);
+  if (h.ibadah) sub.push(strengthChip(h));
+  else {
+    const cs = currentStreak(h);
+    if (cs.value > 0) sub.push(`<span class="streak">${icon.flame(13)} ${streakText(cs)}</span>`);
+  }
   if (isNamazHabit(h) && dkey(day) === todayKey()) {
     const debt = qadaDebt().total;
     if (debt) sub.push(`<span class="debt">каза ${debt}</span>`);
@@ -607,12 +620,21 @@ function openHabitDetail(id) {
           </div>
           <div class="group-title">${esc(dayLabel)}</div>
           <div class="card pad">${editor}</div>
-          <div class="tiles">
+          ${h.ibadah ? (() => {
+            const sv = strengthOf(h);
+            const tr = strengthTrend(h);
+            return `<div class="tiles">
+            <div class="tile tile-wide"><div class="tile-label">Сила привычки</div><div class="strength-big">${ring(sv / 100, { size: 52, stroke: 6, color: h.color, key: `str-${h.id}` })}<div><div class="tile-val" style="color:${h.color}">${sv}<small> из 100</small></div><div class="muted small ${tr > 0 ? 'is-up' : ''}">${trendText(tr)}</div></div></div></div>
+            <div class="tile"><div class="tile-label">За 30 дней</div><div class="tile-val">${pct(rateOf(h, 30))}</div></div>
+            <div class="tile"><div class="tile-label">Всего раз</div><div class="tile-val">${totalCompletions(h)}</div></div>
+          </div>
+          <p class="hint center">Серия ${streakText(cur)} · рекорд ${streakText(best)}. Пропуск не обнуляет силу — она снижается и снова растёт.</p>`;
+          })() : `<div class="tiles">
             <div class="tile"><div class="tile-label">Текущая серия</div><div class="tile-val" style="color:${h.color}">${cur.value}<small>${cur.unit === 'weeks' ? ' нед.' : ` ${plural(cur.value, DAY_FORMS)}`}</small></div></div>
             <div class="tile"><div class="tile-label">Рекорд</div><div class="tile-val">${best.value}<small>${best.unit === 'weeks' ? ' нед.' : ` ${plural(best.value, DAY_FORMS)}`}</small></div></div>
             <div class="tile"><div class="tile-label">За 30 дней</div><div class="tile-val">${pct(rateOf(h, 30))}</div></div>
             <div class="tile"><div class="tile-label">Всего раз</div><div class="tile-val">${totalCompletions(h)}</div></div>
-          </div>
+          </div>`}
           <div class="group-title">Последний год</div>
           <div class="card pad">${heatmap(habitHeatValue(h), h.color)}</div>
           ${isNamazHabit(h) ? qadaCard() + namazStatsCard(h) : ''}
@@ -681,7 +703,7 @@ function openHabitDetail(id) {
 function stageEditor(h, day) {
   const key = dkey(day);
   const list = stagesForDay(h, day);
-  return `<div class="stage-list">${list.map((s) => {
+  return `<div class="stage-list ${h.ibadah ? 'is-soft' : ''}">${list.map((s) => {
     const val = getStageLog(h.id, key, s.id);
     const ok = stageDone(h, key, s);
     const ev = stageMark(h, key, s);
@@ -693,7 +715,7 @@ function stageEditor(h, day) {
       ontime: `${kindLabel}отмечено в ${at}`,
       late: `${kindLabel}вовремя, отмечено в ${at}`,
       qada: `каза · восполнено в ${at}`,
-      missed: `пропущен (${window_}) · долг каза`,
+      missed: h.ibadah ? `не отмечено (${window_}) · можно восполнить` : `пропущен (${window_}) · долг каза`,
     }[status] || (ok && at ? `отмечено в ${at}` : window_);
     const range = s.max && s.max !== s.min ? `${s.min}–${s.max}` : `${s.min}`;
     const control = h.type === 'count'
@@ -750,7 +772,7 @@ function namazStatsCard(h) {
     <div class="tiles">
       <div class="tile"><div class="tile-label">Вовремя</div><div class="tile-val" style="color:var(--green)">${pctOf(s.ontime + s.late)}</div></div>
       <div class="tile"><div class="tile-label">Каза</div><div class="tile-val" style="color:var(--orange)">${s.qada}</div></div>
-      <div class="tile"><div class="tile-label">Пропущено</div><div class="tile-val" style="color:${s.missed ? 'var(--red)' : 'inherit'}">${s.missed}</div></div>
+      <div class="tile"><div class="tile-label">${h.ibadah ? 'Не отмечено' : 'Пропущено'}</div><div class="tile-val" style="color:${s.missed && !h.ibadah ? 'var(--red)' : 'inherit'}">${s.missed}</div></div>
       <div class="tile"><div class="tile-label">Джума</div><div class="tile-val">${s.juma}<small> из ${s.fridays}</small></div></div>
     </div>
     ${s.late ? `<p class="hint">Отмечено с опозданием (но прочитано вовремя): ${s.late}.</p>` : ''}`;
@@ -832,6 +854,9 @@ function openHabitEditor(existing) {
           ${f.schedule.kind === 'weekdays' ? `<div class="chips">${[1, 2, 3, 4, 5, 6, 0].map((d) => `<button class="chip ${f.schedule.days.includes(d) ? 'is-active' : ''}" style="--c:${f.color}" data-wd="${d}">${WEEKDAYS_SHORT[d]}</button>`).join('')}</div>` : ''}
           ${f.schedule.kind === 'perWeek' ? `<div class="inline-stepper"><button class="round-btn sm" data-e="tm">${icon.minus(16)}</button><span><b>${f.schedule.times}</b> ${plural(f.schedule.times, ['раз', 'раза', 'раз'])} в неделю</span><button class="round-btn sm" data-e="tp">${icon.plus(16)}</button></div>` : ''}
         </div>
+        <div class="card pad mt">
+          <label class="switch-row"><span><b>Ибадат</b><br><span class="muted small">Главная метрика — сила привычки: пропуск не обнуляет прогресс</span></span><input type="checkbox" class="switch" data-e="ibadah" ${f.ibadah ? 'checked' : ''}></label>
+        </div>
         ${stagesSection(f)}
       </div>`,
     mount: (api) => {
@@ -839,6 +864,7 @@ function openHabitEditor(existing) {
       const q = (s) => el.querySelector(`[data-e=${s}]`);
       const saveBtn = q('save');
       q('cancel').onclick = () => api.close();
+      q('ibadah').onchange = (e) => (f.ibadah = e.target.checked);
       q('name').oninput = (e) => {
         f.name = e.target.value;
         saveBtn.disabled = !f.name.trim();
@@ -895,6 +921,7 @@ function openHabitEditor(existing) {
             time: x.time,
           })) : [],
           reminders: f.useStages && f.type !== 'timer' ? [] : f.reminders,
+          ibadah: !!f.ibadah,
         };
         if (existing) out.id = existing.id;
         upsertHabit(out);
@@ -1007,6 +1034,7 @@ function mountStagesSection(el, f, api) {
   if (q('addReminder')) q('addReminder').onclick = () => (f.reminders.push({ mode: 'fixed', at: '09:00' }), api.refresh());
   if (q('tplNamaz')) q('tplNamaz').onclick = () => {
     f.stages = NAMAZ_STAGES();
+    f.ibadah = true;
     if (!f.name.trim()) f.name = 'Намаз';
     api.refresh();
   };
@@ -1312,9 +1340,10 @@ function viewStats() {
       const cur = currentStreak(h);
       const best = bestStreak(h);
       const r = rateOf(h, 30);
+      const sv = h.ibadah ? strengthOf(h) : 0;
       return `<button class="row" data-action="open-habit" data-id="${h.id}">
-        ${ring(r ?? 0, { size: 36, stroke: 3.5, color: h.color, key: `st-${h.id}`, inner: `<span class="emoji-sm">${esc(h.emoji)}</span>` })}
-        <div class="row-main"><b>${esc(h.name)}</b><span class="muted">${icon.flame(12)} ${streakText(cur)} · рекорд ${streakText(best)}</span></div>
+        ${ring(h.ibadah ? sv / 100 : r ?? 0, { size: 36, stroke: 3.5, color: h.color, key: `st-${h.id}`, inner: `<span class="emoji-sm">${esc(h.emoji)}</span>` })}
+        <div class="row-main"><b>${esc(h.name)}</b><span class="muted">${h.ibadah ? `Сила ${sv} · ${trendText(strengthTrend(h))}` : `${icon.flame(12)} ${streakText(cur)} · рекорд ${streakText(best)}`}</span></div>
         <span class="row-val">${pct(r)}</span>
       </button>`;
     })

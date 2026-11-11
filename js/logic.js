@@ -1,5 +1,5 @@
 // Бизнес-логика: расписания, серии, проценты, воздержание, достижения.
-import { getData, getLog, getStageLog, habitsActive, habitsAll, abstainAll, subscribe } from './store.js';
+import { getData, getLog, getStageLog, getEvents, habitsActive, habitsAll, abstainAll, subscribe } from './store.js';
 import { addDays, dkey, parseKey, startOfDay, startOfWeek, today, plural, DAY_FORMS, TIMES_FORMS, WEEKDAYS_SHORT } from './util.js';
 
 const DAY = 86400000;
@@ -184,6 +184,68 @@ export function rateOf(h, days = 30) {
   }
   return need ? got / need : null;
 }
+
+// ================= Сила привычки =================
+// Экспоненциальное сглаживание по дням расписания (как в Loop Habit Tracker), шкала 0–100.
+// Один пропуск после долгой серии снижает силу, но не обнуляет её. Считается из журнала, не хранится.
+
+/** Множитель на один день расписания: при ежедневном выполнении ≈80 через месяц, ≈96 через два, ≈99 через три. */
+export const STRENGTH_MULT = 0.5 ** (1 / 13);
+/** Какую долю от «вовремя» даёт каза. */
+export const QADA_CREDIT = 0.5;
+
+/** Вклад дня 0..1: доля выполненного; у этапов каза — QADA_CREDIT; этапы до since не учитываются. */
+export function dayCredit(h, day) {
+  const key = keyOf(day);
+  if (h.type === 'check' && hasStages(h)) {
+    const st = activeStages(h, key);
+    if (!st.length) return 0;
+    let sum = 0;
+    for (const s of st) {
+      if (!stageDone(h, key, s)) continue;
+      const marks = getEvents(h.id, key).filter((e) => e.s === s.id && e.d > 0);
+      sum += marks[marks.length - 1]?.k === 'qada' ? QADA_CREDIT : 1;
+    }
+    return sum / st.length;
+  }
+  return progressOf(h, key);
+}
+
+const strengthCache = new Map();
+subscribe(() => strengthCache.clear());
+
+/** Сила привычки 0–100 на конец дня until. Сегодняшний день учитывается, только если уже выполнен. */
+export function strengthOf(h, until = today()) {
+  const ck = `${h.id}|${dkey(until)}`;
+  if (!strengthCache.has(ck)) strengthCache.set(ck, computeStrength(h, startOfDay(until)));
+  return strengthCache.get(ck);
+}
+
+function computeStrength(h, until) {
+  const t = today();
+  const first = firstDay(h);
+  let s = 0;
+  if (isPerWeek(h)) {
+    const times = h.schedule.times || 1;
+    const m = STRENGTH_MULT ** 7;
+    for (let ws = startOfWeek(first), i = 0; ws <= until && i < 600; ws = addDays(ws, 7), i++) {
+      const done = doneInWeek(h, ws);
+      const open = addDays(ws, 6) >= until || addDays(ws, 6) >= t; // неделя ещё идёт
+      if (open && done < times) continue;
+      s = s * m + Math.min(1, done / times) * (1 - m);
+    }
+  } else {
+    for (let d = first, i = 0; d <= until && i < 4000; d = addDays(d, 1), i++) {
+      if (!isScheduled(h, d)) continue;
+      if (+d === +t && !isDone(h, d)) continue; // сегодня ещё не вечер
+      s = s * STRENGTH_MULT + dayCredit(h, d) * (1 - STRENGTH_MULT);
+    }
+  }
+  return Math.round(s * 100);
+}
+
+/** Изменение силы за последние 30 дней. */
+export const strengthTrend = (h) => strengthOf(h) - strengthOf(h, addDays(today(), -30));
 
 export function totalCompletions(h) {
   const logs = getData().logs[h.id] || {};

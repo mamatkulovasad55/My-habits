@@ -18,14 +18,26 @@ const strip = (d) => {
   const m = migrate(old);
   assert.equal(m.schemaVersion, SCHEMA_VERSION);
   assert.equal(JSON.stringify(old), snapshot, 'исходный объект не изменён');
-  assert.deepEqual(strip(m), JSON.parse(snapshot), 'кроме schemaVersion всё на месте');
+  const expected = JSON.parse(snapshot);
+  expected.habits = expected.habits.map((h) => (h.id === 'namaz' ? { ...h, ibadah: true } : h)); // шаг v2
+  assert.deepEqual(strip(m), expected, 'кроме schemaVersion и ibadah у Намаза всё на месте');
   const n = normalize(old);
-  assert.equal(n.schemaVersion, 1);
-  for (const k of ['habits', 'logs', 'abstain', 'notes']) assert.deepEqual(n[k], old[k], `${k} без изменений`);
+  assert.equal(n.schemaVersion, SCHEMA_VERSION);
+  for (const k of ['logs', 'abstain', 'notes']) assert.deepEqual(n[k], old[k], `${k} без изменений`);
+  assert.deepEqual(n.habits, expected.habits);
   assert.deepEqual(n.settings, { ...defaultSettings(), ...old.settings, qada: { ...defaultSettings().qada, ...old.settings.qada } });
   assert.deepEqual(migrate(m), m, 'идемпотентно');
   assert.equal(migrate(m), m, 'актуальная версия не копируется');
-  console.log('✓ данные без schemaVersion → v1 без потерь, миграция идемпотентна');
+  console.log('✓ данные без schemaVersion → актуальная версия без потерь, миграция идемпотентна');
+  // v1 → v2: ibadah только у намазов, явный false не перезаписывается
+  const v1 = { ...typicalData(), schemaVersion: 1 };
+  v1.habits = v1.habits.map((h) => (h.id === 'gym' ? { ...h, stages: [{ id: 's', time: { mode: 'prayer', prayer: 'fajr' } }], ibadah: false } : h));
+  const v2 = migrate(v1);
+  assert.equal(v2.habits.find((h) => h.id === 'namaz').ibadah, true);
+  assert.equal(v2.habits.find((h) => h.id === 'water').ibadah, undefined);
+  assert.equal(v2.habits.find((h) => h.id === 'gym').ibadah, false, 'явный выбор сохраняется');
+  assert.equal(v2.habits.find((h) => h.id === 'namaz').updatedAt, 1, 'updatedAt не меняется');
+  console.log('✓ v1 → v2: ibadah у привычек-намазов, явный false сохранён');
 }
 
 // 2. Неизвестный k и неизвестные поля события переживают слияние в обе стороны
