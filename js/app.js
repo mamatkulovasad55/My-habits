@@ -14,7 +14,7 @@ import {
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
-import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
+import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -382,6 +382,8 @@ function choiceSheet({ title, message = '', options }) {
   });
 }
 
+const GENITIVE = { fajr: 'Фаджра', dhuhr: 'Зухра', asr: 'Асра', maghrib: 'Магриба', isha: 'Иши', vitr: 'Витра', juma: 'Джума' };
+
 /** Отметить этап; для намаза — с вопросами про каза и Джума. */
 function markStage(h, date, s, { undo = true } = {}) {
   const key = dkey(date);
@@ -392,6 +394,12 @@ function markStage(h, date, s, { undo = true } = {}) {
     if (undo) toast(label, { action: 'Отменить', onAction: () => setStageLog(h.id, key, s.id, cur) });
   };
   const isPrayer = Boolean(prayerKeyOf(s));
+  const notYet = isPrayer ? prayerNotStarted(date, s) : null;
+  if (notYet != null) {
+    haptic(30);
+    const when = dkey(date) === todayKey() ? `с ${fmtMin(notYet)}` : `${fmtDateShort(date)} с ${fmtMin(notYet)}`;
+    return toast(`Время ${GENITIVE[s.juma ? 'juma' : prayerKeyOf(s)] || 'намаза'} ещё не наступило — ${when}`);
+  }
   const expired = isPrayer && stageExpired(date, s);
   if (expired) {
     const name = s.juma ? 'Джума' : s.name;
@@ -463,7 +471,8 @@ function stagedCard(h, day) {
   if (st) {
     const t = st.start != null ? fmtMin(st.start) : '';
     const amount = h.type === 'count' ? ` · ${st.max && st.max !== st.min ? `${st.min}–${st.max}` : st.min}` : '';
-    sub.push(`<span class="next-stage">${esc(st.name)}${st.overnight ? ' (вчера)' : t ? ` ${t}` : ''}${amount}</span>`);
+    const early = !st.overnight && prayerNotStarted(day, st) != null;
+    sub.push(`<span class="next-stage">${esc(st.name)}${st.overnight ? ' (вчера)' : t ? ` ${early ? 'с ' : ''}${t}` : ''}${amount}</span>`);
   } else if (!done) {
     sub.push('все этапы отмечены');
   }
