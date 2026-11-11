@@ -1,6 +1,6 @@
 // Точка входа: экраны, обработчики, живые таймеры.
 import {
-  getData, getLocal, subscribe, update, updateLocal, replaceData, merge, prepareImport, emptyData, touch,
+  getData, getLocal, subscribe, update, updateLocal, replaceData, merge, prepareImport, resetAll, emptyData, touch,
   habitsActive, habitsAll, abstainAll, findHabit, findAbstain, getLog, setLog,
   getStageLog, setStageLog, getEvents, setNote, addEvent, addDhikrRecord, QADA_LOG, reorderHabits, mergeIntoStaged,
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
@@ -18,7 +18,7 @@ import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHo
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel, tzMismatch, offsetLabel } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
 import { forbiddenWindows } from './logic.js';
-import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS } from './dhikr.js';
+import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS, DHIKR_PENDING_KEY } from './dhikr.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -2345,13 +2345,18 @@ function mountProfile() {
   q('wipe').onclick = () =>
     confirmSheet({
       title: 'Удалить все данные?',
-      message: 'Все привычки, история и таймеры воздержания будут удалены' + ' — в том числе в репозитории.' + ' Сначала можно сделать экспорт.',
+      message: 'Привычки, воздержания, вся история, зикры, заметки и ниййа будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
       confirm: 'Удалить всё',
       destructive: true,
       onConfirm: () => {
-        habitsAll().forEach((h) => removeHabit(h.id));
-        abstainAll().forEach((a) => removeAbstain(a.id));
+        const debt = qadaDebt().byPrayer;
+        resetAll(Object.fromEntries(QADA_KEYS.map((k) => [k, debt[k].oldLeft])));
         updateLocal((l) => (l.timers = {}));
+        try {
+          localStorage.removeItem(DHIKR_PENDING_KEY);
+        } catch {
+          /* ignore */
+        }
         toast('Все данные удалены');
       },
     });
