@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v8';
+const VERSION = 'v9';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',

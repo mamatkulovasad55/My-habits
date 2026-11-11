@@ -10,6 +10,8 @@ export function defaultSettings() {
     theme: 'system',
     updatedAt: 0,
     tz: '',
+    tzAuto: true, // часовой пояс по городу (иначе — tz, выбранный вручную)
+    profile: { niyyah: '' }, // «обо мне»: ниййа (до 300 символов)
     wakeWd: '07:00',
     sleepWd: '23:00',
     wakeWe: '08:00',
@@ -67,6 +69,7 @@ function normalizeSettings(s) {
     forbidden: { ...d.forbidden, ...(s.forbidden || {}) },
     tartib: { ...d.tartib, ...(s.tartib || {}) },
     dhikr: { ...d.dhikr, ...(s.dhikr || {}) },
+    profile: { ...d.profile, ...(s.profile || {}) },
   };
 }
 
@@ -127,6 +130,16 @@ function mergeEntities(a = [], b = []) {
     if (!x || (y.updatedAt || 0) > (x.updatedAt || 0)) map.set(y.id, y);
   }
   return [...map.values()].sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0));
+}
+
+/**
+ * Импорт из файла: привычки и воздержания, удалённые здесь, но живые в файле, восстанавливаются
+ * (иначе «надгробие» новее файла и побеждает при слиянии). Остальное — обычное слияние.
+ */
+export function prepareImport(local, imported, now = Date.now()) {
+  const gone = new Set([...(local?.habits || []), ...(local?.abstain || [])].filter((x) => x.deleted).map((x) => x.id));
+  const revive = (list) => (Array.isArray(list) ? list.map((x) => (x && gone.has(x.id) && !x.deleted ? { ...x, updatedAt: now } : x)) : list);
+  return { ...imported, habits: revive(imported.habits), abstain: revive(imported.abstain) };
 }
 
 export function merge(a, b) {
