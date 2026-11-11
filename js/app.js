@@ -2367,7 +2367,7 @@ function storageWarnStatus() {
   if (s.state === 'syncing') return 'Отправляю на сервер…';
   if (s.state === 'offline' || navigator.onLine === false) return 'Нет сети — отправлю при подключении. Не закрывай приложение.';
   if (s.state === 'error') return `Сервер: ${s.error || 'ошибка'} — нажми «Синхронизировать»`;
-  if (s.last && s.last >= since) return `✓ Отправлено на сервер · ${new Date(s.last).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} `;
+  if (s.last && s.last >= since) return `✓ Отправлено на сервер · ${new Date(s.last).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
   return 'Ещё не отправлено на сервер';
 }
 
