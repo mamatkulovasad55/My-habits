@@ -12,7 +12,26 @@ export const parseHM = (s) => {
 export const isWeekend = (date) => date.getDay() === 0 || date.getDay() === 6;
 
 /** Контекст дня: режим (подъём/сон) и время намазов. date — «наивная» местная дата. */
+// Кэш контекста дня: расчёт времени намаза дорогой, а долг каза и статистика проходят по сотням дней.
+// Ключ — настройки, влияющие на расчёт; при их изменении кэш сбрасывается.
+const ctxCache = new Map();
+let ctxSig = '';
+
 export function dayContext(date, settings = getData().settings) {
+  const sig = JSON.stringify([settings.tz, settings.wakeWd, settings.sleepWd, settings.wakeWe, settings.sleepWe, settings.prayer]);
+  if (sig !== ctxSig || ctxCache.size > 1500) {
+    ctxCache.clear();
+    ctxSig = sig;
+  }
+  const k = dkey(date);
+  const hit = ctxCache.get(k);
+  if (hit) return { ...hit, settings };
+  const ctx = computeDayContext(date, settings);
+  ctxCache.set(k, ctx);
+  return { ...ctx };
+}
+
+function computeDayContext(date, settings) {
   const we = isWeekend(date);
   const wake = parseHM(we ? settings.wakeWe : settings.wakeWd);
   let sleep = parseHM(we ? settings.sleepWe : settings.sleepWd);

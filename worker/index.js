@@ -4,7 +4,7 @@
 //  • cron    — раз в минуту проверяет расписание и присылает напоминания сообщением от бота.
 import { replaceData, merge } from '../js/store.js';
 import { dueReminders } from '../js/schedule.js';
-import { stableStringify } from '../js/util.js';
+import { stableStringify, dkey, addDays } from '../js/util.js';
 import { verifyInitData, webhookSecret, tg, escHtml, openButton } from './telegram.js';
 
 const CORS = {
@@ -47,7 +47,17 @@ function toBase64(str) {
 
 function fromBase64(b64) {
   const bin = atob(b64.replace(/\s/g, ''));
-  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/** Только чтение данных (для cron): сразу «сырой» JSON, без base64 и без sha — дешевле по CPU. */
+async function getRemoteRaw(env) {
+  const res = await fetch(contentsUrl(env), { headers: { ...ghHeaders(env), Accept: 'application/vnd.github.raw+json' } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub ${res.status}`);
+  return { data: await res.json() };
 }
 
 async function getRemote(env) {
@@ -89,17 +99,18 @@ async function syncData(env, clientData) {
 async function auth(req, env) {
   const user = await verifyInitData(req.headers.get('X-Init-Data'), env.BOT_TOKEN);
   if (!user?.id) return { error: json({ error: 'Открой трекер через Telegram', code: 'auth' }, 401) };
-  const owner = await env.KV.get('owner');
+  const owner = await getOwner(env);
+  if (owner === undefined) return { error: json({ error: 'Хранилище временно недоступно, попробуй позже' }, 503) };
   return { user, owner };
 }
 
 async function api(req, env, path) {
   if (path === '/api/info') {
-    let bot = await env.KV.get('bot_username');
+    let bot = await kvGet(env, 'bot_username');
     if (!bot && env.BOT_TOKEN) {
       const me = await tg(env.BOT_TOKEN, 'getMe', {});
       bot = me?.result?.username || '';
-      if (bot) await env.KV.put('bot_username', bot);
+      if (bot && (await kvPut(env, 'bot_username', bot))) pendingWrites++;
     }
     return json({ bot });
   }
@@ -116,7 +127,9 @@ async function api(req, env, path) {
   if (path === '/api/claim') {
     if (owner && owner !== String(user.id)) return json({ error: 'Этот трекер уже привязан к другому аккаунту', code: 'foreign' }, 403);
     if (!safeEqual(body.key, env.PUSH_KEY)) return json({ error: 'Неверный ключ подключения', code: 'key' }, 403);
-    await env.KV.put('owner', String(user.id));
+    if (!(await kvPut(env, 'owner', String(user.id)))) return json({ error: 'Не удалось сохранить владельца, попробуй ещё раз' }, 503);
+    pendingWrites++;
+    ownerCache = String(user.id);
     return json({ ok: true });
   }
 
@@ -149,11 +162,102 @@ async function webhook(req, env) {
   return new Response('ok');
 }
 
+// ---------- KV: экономные записи и защита от ошибок ----------
+// Бесплатный тариф: 1000 записей в сутки (UTC). Всё состояние cron лежит в одном ключе `state`
+// и пишется только когда реально что-то отправлено. Счётчик записей едет в той же записи.
+
+const STATE_KEY = 'state';
+const KV_WARN_AT = 800;
+const utcDay = () => new Date().toISOString().slice(0, 10);
+let pendingWrites = 0; // редкие записи вне state (owner, bot_username) — учтутся при следующей записи state
+let ownerCache = null; // на случай сбоя чтения KV в «тёплом» экземпляре
+
+async function kvGet(env, key, type) {
+  try {
+    return await env.KV.get(key, type);
+  } catch (e) {
+    console.error('KV get failed', key, e?.message);
+    return undefined; // undefined = ошибка, null = ключа нет
+  }
+}
+
+async function kvPut(env, key, value, opts) {
+  try {
+    await env.KV.put(key, value, opts);
+    return true;
+  } catch (e) {
+    console.error('KV put failed', key, e?.message);
+    return false;
+  }
+}
+
+async function getOwner(env) {
+  const v = await kvGet(env, 'owner');
+  if (v === undefined) return ownerCache ?? undefined; // undefined — KV недоступно
+  ownerCache = v;
+  return v;
+}
+
+/** Состояние напоминаний: отправленные ключи за сегодня и вчера, счётчик записей KV, дата бэкапа. */
+async function loadState(env, day) {
+  let raw = await kvGet(env, STATE_KEY, 'json');
+  const failed = raw === undefined;
+  if (raw == null && !failed) {
+    // переход со старого формата `sent:Y-M-D`
+    const [y, m, d] = day.split('-').map(Number);
+    const legacy = await kvGet(env, `sent:${y}-${m}-${d}`, 'json');
+    raw = { day, sent: Array.isArray(legacy) ? legacy : [] };
+  }
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const sameDay = raw.day === day;
+  const state = {
+    day,
+    sent: sameDay && Array.isArray(raw.sent) ? raw.sent : [],
+    prev: sameDay ? (Array.isArray(raw.prev) ? raw.prev : []) : Array.isArray(raw.sent) ? raw.sent : [],
+    kv: raw.kv && typeof raw.kv === 'object' ? raw.kv : { d: utcDay(), n: 0, warned: false },
+    backup: raw.backup || '',
+    failed,
+  };
+  state.has = (k) => state.sent.includes(k) || state.prev.includes(k);
+  return state;
+}
+
+/** Записать состояние (одна запись KV) и при необходимости предупредить о расходе. */
+async function saveState(env, state, owner) {
+  if (state.failed) return false; // не смогли прочитать — не затираем настоящее состояние
+  const d = utcDay();
+  if (state.kv.d !== d) state.kv = { d, n: 0, warned: false };
+  state.kv.n += 1 + pendingWrites;
+  if (state.kv.n >= KV_WARN_AT && !state.kv.warned && owner) {
+    if (await sendTg(env, 'sendMessage', { chat_id: Number(owner), text: `KV: ${KV_WARN_AT}/1000 записей за сутки` })) state.kv.warned = true;
+  }
+  const { day, sent, prev, kv, backup } = state;
+  const ok = await kvPut(env, STATE_KEY, JSON.stringify({ day, sent, prev, kv, backup }));
+  if (ok) pendingWrites = 0;
+  return ok;
+}
+
+/** Вызов Telegram, который никогда не бросает исключение. true — Telegram подтвердил. */
+async function sendTg(env, method, body) {
+  try {
+    const r = await tg(env.BOT_TOKEN, method, body);
+    if (!r?.ok) console.error('Telegram', method, r?.error_code, r?.description);
+    return !!r?.ok;
+  } catch (e) {
+    console.error('Telegram', method, e?.message);
+    return false;
+  }
+}
+
 // ---------- Напоминания ----------
 
+const NOW_FMT = new Map();
+
 function localNow(tz) {
+  tz = tz || 'UTC';
+  if (!NOW_FMT.has(tz)) NOW_FMT.set(tz, new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
   const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', { timeZone: tz || 'UTC', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    NOW_FMT.get(tz)
       .formatToParts(new Date())
       .map((x) => [x.type, x.value]),
   );
@@ -162,31 +266,43 @@ function localNow(tz) {
 
 async function tick(env) {
   if (!env.DATA_TOKEN || !env.DATA_OWNER || !env.BOT_TOKEN) return;
-  const owner = await env.KV.get('owner');
+  const owner = await getOwner(env);
   if (!owner) return;
-  const remote = await getRemote(env);
+  const remote = await getRemoteRaw(env);
   if (!remote) return;
   replaceData(remote.data);
   const { date, min } = localNow(remote.data.settings?.tz);
   // окно в 3 минуты на случай задержки cron; повторы отсекаются по ключам
   const due = dueReminders(date, min - 3, min);
+  if (min < 3) due.push(...dueReminders(addDays(date, -1), 1440 + min - 3, 1440)); // хвост вчерашнего дня
   if (!due.length) return;
-  const dayKey = `sent:${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-  const sent = new Set((await env.KV.get(dayKey, 'json')) || []);
-  const fresh = due.filter((r) => !sent.has(r.key));
+  const state = await loadState(env, dkey(date));
+  const fresh = due.filter((r) => !state.has(r.key));
   if (!fresh.length) return;
+  let changed = false;
   for (const r of fresh) {
     // Telegram передаёт параметры запуска в #хэше, поэтому экран указываем через ?query
     const url = r.url === './#checkin' ? `${env.APP_URL}?screen=checkin` : env.APP_URL;
-    await tg(env.BOT_TOKEN, 'sendMessage', {
+    const ok = await sendTg(env, 'sendMessage', {
       chat_id: Number(owner),
       text: `<b>${escHtml(r.title)}</b>\n${escHtml(r.body)}`,
       parse_mode: 'HTML',
       reply_markup: openButton(url, r.url === './#checkin' ? 'Открыть чек-ин' : 'Открыть трекер'),
     });
-    sent.add(r.key);
+    if (ok) {
+      state.sent.push(r.key);
+      changed = true;
+    }
   }
-  await env.KV.put(dayKey, JSON.stringify([...sent]), { expirationTtl: 3 * 86400 });
+  if (changed) await saveState(env, state, owner);
+}
+
+async function runTick(env) {
+  try {
+    await tick(env);
+  } catch (e) {
+    console.error('tick failed', e?.message);
+  }
 }
 
 export default {
@@ -200,6 +316,6 @@ export default {
   },
 
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(tick(env));
+    ctx.waitUntil(runTick(env));
   },
 };
