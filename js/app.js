@@ -331,9 +331,28 @@ const nowMin = () => {
   return d.getHours() * 60 + d.getMinutes();
 };
 
-/** Этап, который отмечает кнопка на карточке. */
+/**
+ * После полуночи и до Фаджра время вчерашних Иши и Витра ещё не вышло:
+ * кнопка Намаза на «Сегодня» отмечает их во вчерашнем дне (вовремя), а не сегодняшний Фаджр.
+ */
+function overnightStage(h) {
+  if (!isNamazHabit(h)) return null;
+  const y = addDays(today(), -1);
+  if (!isScheduled(h, y)) return null;
+  const yk = dkey(y);
+  const st = stagesForDay(h, y).filter((s) => s.end > 1440 && s.start != null && !stageDone(h, yk, s) && !stageExpired(y, s));
+  if (!st.length) return null;
+  st.sort((a, b) => (a.role === 'vitr') - (b.role === 'vitr') || a.start - b.start);
+  return { ...st[0], day: y, overnight: true };
+}
+
+/** Этап, который отмечает кнопка на карточке. У этапа из вчерашнего дня есть поле day. */
 function tapStage(h, day) {
   const isToday = dkey(day) === todayKey();
+  if (isToday) {
+    const o = overnightStage(h);
+    if (o) return o;
+  }
   return currentStage(h, day, isToday ? nowMin() : 1440 * 2, dayContext(day));
 }
 
@@ -444,7 +463,7 @@ function stagedCard(h, day) {
   if (st) {
     const t = st.start != null ? fmtMin(st.start) : '';
     const amount = h.type === 'count' ? ` · ${st.max && st.max !== st.min ? `${st.min}–${st.max}` : st.min}` : '';
-    sub.push(`<span class="next-stage">${esc(st.name)}${t ? ` ${t}` : ''}${amount}</span>`);
+    sub.push(`<span class="next-stage">${esc(st.name)}${st.overnight ? ' (вчера)' : t ? ` ${t}` : ''}${amount}</span>`);
   } else if (!done) {
     sub.push('все этапы отмечены');
   }
@@ -482,9 +501,10 @@ function habitTap(id) {
   if (hasStages(h)) {
     const st = tapStage(h, state.day);
     if (!st) return openHabitDetail(id);
-    const cur = getStageLog(id, key, st.id);
-    if (h.type === 'check') return markStage(h, state.day, st);
-    return setStageLog(id, key, st.id, cur + (Number(h.step) || 1));
+    const day = st.day || state.day;
+    const cur = getStageLog(id, dkey(day), st.id);
+    if (h.type === 'check') return markStage(h, day, st);
+    return setStageLog(id, dkey(day), st.id, cur + (Number(h.step) || 1));
   }
   if (h.type === 'check') {
     if (v >= 1) {

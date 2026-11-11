@@ -320,7 +320,8 @@ async function tick(env) {
   const { date, min } = localNow(remote.data.settings?.tz);
   // окно в 3 минуты на случай задержки cron; повторы отсекаются по ключам
   const due = dueReminders(date, min - 3, min);
-  if (min < 3) due.push(...dueReminders(addDays(date, -1), 1440 + min - 3, 1440)); // хвост вчерашнего дня
+  // вчерашний день: хвост через полночь и этапы, чьё время длится до утра (утренний повтор про Ишу)
+  if (min < 720) due.push(...dueReminders(addDays(date, -1), 1440 + min - 3, 1440 + min));
   // еженедельный бэкап: воскресенье с 21:00 до конца дня (догоняет, если cron пропустил минуту)
   const backupDay = date.getDay() === BACKUP_WEEKDAY && min >= BACKUP_AT ? dkey(date) : '';
   if (!due.length && !backupDay) return;
