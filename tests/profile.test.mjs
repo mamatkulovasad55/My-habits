@@ -99,3 +99,24 @@ for (const city of ['Стамбул', 'Ташкент']) {
   assert.equal(synced.habits.filter((h) => !h.deleted).length, backup.habits.length);
   console.log('✓ экспорт → удалить всё → импорт: привычки, история и ниййа вернулись');
 }
+
+// 6. Неизвестный серверу пояс не отключает напоминания: бот берёт пояс города
+{
+  const data = typicalData();
+  data.settings.tz = 'Mars/Olympus_Mons';
+  data.settings.tzAuto = false;
+  net.remote = JSON.stringify(data);
+  net.tg.length = 0;
+  const KV = memoryKV();
+  KV.map.set('owner', '777');
+  const env = { KV, BOT_TOKEN: '1:T', DATA_TOKEN: 'gh', DATA_OWNER: 'me', APP_URL: 'https://x/' };
+  let at = null;
+  for (let m = 6 * 60; m < 9 * 60 && at == null; m++) {
+    setNow(Date.UTC(2026, 10, 11, 0, m));
+    await runCron(worker, env);
+    if (net.tg.some((x) => /Зухр/.test(x.body.text || ''))) at = m + 300;
+  }
+  assert.equal(at, 12 * 60 + 7, 'Зухр по Ташкенту в 12:07, как с правильным поясом');
+  assert.equal(JSON.parse(net.remote).settings.tz, 'Mars/Olympus_Mons', 'данные на сервере не изменены');
+  console.log('✓ неизвестный пояс: бот считает по поясу города, напоминание о Зухре в 12:07');
+}
