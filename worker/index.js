@@ -4,8 +4,8 @@
 //  • cron    — раз в минуту проверяет расписание и присылает напоминания сообщением от бота.
 import { replaceData, merge } from '../js/store.js';
 import { dueReminders } from '../js/schedule.js';
-import { stableStringify, dkey, addDays } from '../js/util.js';
-import { verifyInitData, webhookSecret, tg, escHtml, openButton } from './telegram.js';
+import { stableStringify, dkey, addDays, pad, plural } from '../js/util.js';
+import { verifyInitData, webhookSecret, tg, tgDocument, escHtml, openButton } from './telegram.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -143,6 +143,17 @@ async function api(req, env, path) {
       return json({ error: e.message }, 502);
     }
   }
+  if (path === '/api/backup') {
+    try {
+      const remote = await getRemoteRaw(env);
+      if (!remote) return json({ error: 'Данных пока нет' }, 404);
+      const r = await sendBackup(env, owner, remote.data);
+      if (!r.ok) return json({ error: 'Telegram не принял файл, попробуй позже' }, 502);
+      return json({ ok: true, events: r.events });
+    } catch (e) {
+      return json({ error: e.message }, 502);
+    }
+  }
   return json({ error: 'Not found' }, 404);
 }
 
@@ -249,6 +260,41 @@ async function sendTg(env, method, body) {
   }
 }
 
+// ---------- Бэкап ----------
+
+const BACKUP_WEEKDAY = 0; // воскресенье
+const BACKUP_AT = 21 * 60; // 21:00 по местному времени (settings.tz)
+let backupSentDay = ''; // защита от повторов, если запись состояния в KV не удалась
+
+/** Число событий в журнале (старые записи без ev считаются одним событием). */
+function countEvents(data) {
+  let n = 0;
+  for (const days of Object.values(data?.logs || {})) {
+    for (const e of Object.values(days || {})) n += Array.isArray(e?.ev) ? e.ev.length : e?.v ? 1 : 0;
+  }
+  return n;
+}
+
+/** Прислать data.json владельцу документом. date — местная дата для имени и подписи. */
+async function sendBackup(env, owner, data, date = localNow(data?.settings?.tz).date) {
+  const events = countEvents(data);
+  const day = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
+  let ok = false;
+  try {
+    const r = await tgDocument(env.BOT_TOKEN, {
+      chat_id: Number(owner),
+      caption: `Бэкап · ${day} · ${events.toLocaleString('ru-RU')} ${plural(events, ['событие', 'события', 'событий'])}`,
+      filename: `data-${dkey(date)}.json`,
+      content: stableStringify(data, 1) + '\n',
+    });
+    ok = !!r?.ok;
+    if (!ok) console.error('Telegram sendDocument', r?.error_code, r?.description);
+  } catch (e) {
+    console.error('Telegram sendDocument', e?.message);
+  }
+  return { ok, events };
+}
+
 // ---------- Напоминания ----------
 
 const NOW_FMT = new Map();
@@ -275,11 +321,18 @@ async function tick(env) {
   // окно в 3 минуты на случай задержки cron; повторы отсекаются по ключам
   const due = dueReminders(date, min - 3, min);
   if (min < 3) due.push(...dueReminders(addDays(date, -1), 1440 + min - 3, 1440)); // хвост вчерашнего дня
-  if (!due.length) return;
+  // еженедельный бэкап: воскресенье с 21:00 до конца дня (догоняет, если cron пропустил минуту)
+  const backupDay = date.getDay() === BACKUP_WEEKDAY && min >= BACKUP_AT ? dkey(date) : '';
+  if (!due.length && !backupDay) return;
   const state = await loadState(env, dkey(date));
   const fresh = due.filter((r) => !state.has(r.key));
-  if (!fresh.length) return;
+  const needBackup = backupDay && state.backup !== backupDay && backupSentDay !== backupDay && !state.failed;
+  if (!fresh.length && !needBackup) return;
   let changed = false;
+  if (needBackup && (await sendBackup(env, owner, remote.data, date)).ok) {
+    state.backup = backupSentDay = backupDay;
+    changed = true;
+  }
   for (const r of fresh) {
     // Telegram передаёт параметры запуска в #хэше, поэтому экран указываем через ?query
     const url = r.url === './#checkin' ? `${env.APP_URL}?screen=checkin` : env.APP_URL;
