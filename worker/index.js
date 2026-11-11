@@ -5,6 +5,7 @@
 import { replaceData, merge } from '../js/store.js';
 import { dueReminders } from '../js/schedule.js';
 import { stableStringify, dkey, addDays, pad, plural } from '../js/util.js';
+import { cityTz } from '../js/prayer.js';
 import { verifyInitData, webhookSecret, tg, tgDocument, escHtml, openButton } from './telegram.js';
 
 const CORS = {
@@ -276,7 +277,7 @@ function countEvents(data) {
 }
 
 /** Прислать data.json владельцу документом. date — местная дата для имени и подписи. */
-async function sendBackup(env, owner, data, date = localNow(data?.settings?.tz).date) {
+async function sendBackup(env, owner, data, date = localNow(effectiveTz(data?.settings)).date) {
   const events = countEvents(data);
   const day = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
   let ok = false;
@@ -299,14 +300,31 @@ async function sendBackup(env, owner, data, date = localNow(data?.settings?.tz).
 
 const NOW_FMT = new Map();
 
-function localNow(tz) {
-  tz = tz || 'UTC';
+function zoneFormat(tz) {
   if (!NOW_FMT.has(tz)) NOW_FMT.set(tz, new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
-  const parts = Object.fromEntries(
-    NOW_FMT.get(tz)
-      .formatToParts(new Date())
-      .map((x) => [x.type, x.value]),
-  );
+  return NOW_FMT.get(tz);
+}
+
+/**
+ * Пояс, по которому считает бот. Если пояс из настроек среде неизвестен (выбран вручную на телефоне с более
+ * новым списком поясов, повреждённые данные) — берём пояс города, затем UTC: напоминания не должны пропасть.
+ */
+function effectiveTz(settings) {
+  for (const tz of [settings?.tz, cityTz({ prayer: settings?.prayer })]) {
+    if (!tz) continue;
+    try {
+      zoneFormat(tz);
+      return tz;
+    } catch {
+      console.error('Unknown time zone', tz);
+    }
+  }
+  return 'UTC';
+}
+
+/** Местные дата и минута в поясе tz (он уже проверен effectiveTz). */
+function localNow(tz) {
+  const parts = Object.fromEntries(zoneFormat(tz).formatToParts(new Date()).map((x) => [x.type, x.value]));
   return { date: new Date(+parts.year, +parts.month - 1, +parts.day), min: (+parts.hour % 24) * 60 + +parts.minute };
 }
 
@@ -334,8 +352,11 @@ async function tickUser(env, user) {
   const owner = user.chatId;
   const remote = await getRemoteRaw(env);
   if (!remote) return;
-  replaceData(remote.data);
-  const { date, min } = localNow(remote.data.settings?.tz);
+  // расчёт времени намаза и «сейчас» — в одном и том же поясе (в сам файл данных замена не попадает)
+  const st = remote.data.settings;
+  const tz = effectiveTz(st);
+  replaceData(tz === st?.tz ? remote.data : { ...remote.data, settings: { ...st, tz } });
+  const { date, min } = localNow(tz);
   // окно в 3 минуты на случай задержки cron; повторы отсекаются по ключам
   const due = dueReminders(date, min - 3, min);
   // вчерашний день: хвост через полночь и этапы, чьё время длится до утра (утренний повтор про Ишу)

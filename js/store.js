@@ -74,7 +74,7 @@ function normalizeSettings(s) {
 }
 
 // Поля верхнего уровня, которые этот код понимает. Остальные (разделы из будущих версий) сохраняются как есть.
-const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'habits', 'logs', 'abstain', 'notes', 'settings']);
+const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'resetAt', 'habits', 'logs', 'abstain', 'notes', 'settings']);
 
 export function normalize(d) {
   const e = emptyData();
@@ -85,6 +85,7 @@ export function normalize(d) {
     version: 1,
     schemaVersion: Number(d.schemaVersion) || SCHEMA_VERSION,
     updatedAt: Number(d.updatedAt) || 0,
+    resetAt: Number(d.resetAt) || 0, // метка «Удалить все данные»: журнал и заметки старше неё отбрасываются при слиянии
     habits: Array.isArray(d.habits) ? d.habits : [],
     logs: d.logs && typeof d.logs === 'object' ? d.logs : {},
     abstain: Array.isArray(d.abstain) ? d.abstain : [],
@@ -113,7 +114,11 @@ function mergeEntry(x, y) {
   if (!y) return x;
   if (!Array.isArray(x.ev) && !Array.isArray(y.ev)) return (y.t || 0) > (x.t || 0) ? y : x;
   const map = new Map();
-  for (const ev of [...entryEvents(x), ...entryEvents(y)]) map.set(ev.id, ev);
+  for (const ev of [...entryEvents(x), ...entryEvents(y)]) {
+    const cur = map.get(ev.id);
+    // одно и то же событие с двух сторон: оставляем восстановленное из бэкапа (r), иначе оно пропадёт после сброса
+    if (!cur || (ev.r || 0) >= (cur.r || 0)) map.set(ev.id, ev);
+  }
   const ev = [...map.values()].sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
   const out = { ev, t: Math.max(x.t || 0, y.t || 0) };
   out.v = entryValue(out);
@@ -132,14 +137,51 @@ function mergeEntities(a = [], b = []) {
   return [...map.values()].sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0));
 }
 
+// ---------- Сброс («Удалить все данные») ----------
+// data.resetAt — время сброса. Журнал сливается объединением, поэтому простое удаление вернулось бы с сервера:
+// вместо этого при слиянии отбрасываются события и заметки старше метки. Событие, восстановленное из бэкапа
+// после сброса, получает поле r (время восстановления) и переживает метку.
+
+const eventAlive = (ev, resetAt) => Math.max(ev.ts || 0, ev.r || 0) >= resetAt;
+
+/** Запись дня без событий старше метки сброса (null — ничего не осталось). */
+function pruneEntry(e, resetAt) {
+  if (!e || !resetAt) return e;
+  if (!Array.isArray(e.ev)) return (e.t || 0) >= resetAt ? e : null;
+  const ev = e.ev.filter((x) => eventAlive(x, resetAt));
+  if (ev.length === e.ev.length) return e;
+  if (!ev.length) return null;
+  const out = { ...e, ev };
+  out.v = entryValue(out);
+  return out;
+}
+
 /**
- * Импорт из файла: привычки и воздержания, удалённые здесь, но живые в файле, восстанавливаются
- * (иначе «надгробие» новее файла и побеждает при слиянии). Остальное — обычное слияние.
+ * Импорт из файла поверх текущих данных. Обычное слияние не вернуло бы то, что удалено здесь позже,
+ * чем сделан бэкап, поэтому:
+ *  • привычки и воздержания с «надгробием» здесь, но живые в файле — восстанавливаются;
+ *  • после сброса: события и заметки из файла помечаются как восстановленные, настройки (ниййа) берутся из файла.
  */
 export function prepareImport(local, imported, now = Date.now()) {
   const gone = new Set([...(local?.habits || []), ...(local?.abstain || [])].filter((x) => x.deleted).map((x) => x.id));
   const revive = (list) => (Array.isArray(list) ? list.map((x) => (x && gone.has(x.id) && !x.deleted ? { ...x, updatedAt: now } : x)) : list);
-  return { ...imported, habits: revive(imported.habits), abstain: revive(imported.abstain) };
+  const out = { ...imported, habits: revive(imported.habits), abstain: revive(imported.abstain) };
+  const resetAt = Number(local?.resetAt) || 0;
+  if (!resetAt) return out;
+  const logs = {};
+  for (const [hid, days] of Object.entries(imported.logs || {})) {
+    logs[hid] = {};
+    for (const [day, e] of Object.entries(days || {})) {
+      const ev = entryEvents(e).map((x) => (eventAlive(x, resetAt) ? x : { ...x, r: now }));
+      logs[hid][day] = { ...e, ev, t: Math.max(e?.t || 0, now) };
+    }
+  }
+  const notes = {};
+  for (const [day, n] of Object.entries(imported.notes || {})) notes[day] = (n?.t || 0) >= resetAt ? n : { ...n, t: now };
+  out.logs = logs;
+  out.notes = notes;
+  if (imported.settings && (imported.settings.updatedAt || 0) < resetAt) out.settings = { ...imported.settings, updatedAt: now };
+  return out;
 }
 
 export function merge(a, b) {
@@ -147,17 +189,22 @@ export function merge(a, b) {
   b = normalize(b);
   const habits = mergeEntities(a.habits, b.habits);
   const deleted = new Set(habits.filter((h) => h.deleted).map((h) => h.id));
+  const resetAt = Math.max(a.resetAt, b.resetAt);
   const logs = {};
   for (const hid of new Set([...Object.keys(a.logs), ...Object.keys(b.logs)])) {
     if (deleted.has(hid)) continue;
     const la = a.logs[hid] || {};
     const lb = b.logs[hid] || {};
     const out = {};
-    for (const day of new Set([...Object.keys(la), ...Object.keys(lb)])) out[day] = mergeEntry(la[day], lb[day]);
-    logs[hid] = out;
+    for (const day of new Set([...Object.keys(la), ...Object.keys(lb)])) {
+      const e = pruneEntry(mergeEntry(la[day], lb[day]), resetAt);
+      if (e) out[day] = e;
+    }
+    if (!resetAt || Object.keys(out).length) logs[hid] = out;
   }
   const notes = { ...a.notes };
   for (const [k, n] of Object.entries(b.notes)) if (!notes[k] || (n.t || 0) > (notes[k].t || 0)) notes[k] = n;
+  if (resetAt) for (const [k, n] of Object.entries(notes)) if ((n?.t || 0) < resetAt) delete notes[k];
   // неизвестные разделы: целиком от более свежей стороны (их разберёт код той версии, что их создала)
   const extra = {};
   for (const src of a.updatedAt > b.updatedAt ? [b, a] : [a, b]) {
@@ -168,6 +215,7 @@ export function merge(a, b) {
     version: 1,
     schemaVersion: Math.max(a.schemaVersion, b.schemaVersion),
     updatedAt: Math.max(a.updatedAt, b.updatedAt),
+    resetAt,
     habits,
     logs,
     abstain: mergeEntities(a.abstain, b.abstain),
@@ -339,6 +387,23 @@ function tombstone(e) {
   for (const k of Object.keys(e)) if (!['id', 'createdAt'].includes(k)) delete e[k];
   e.deleted = true;
   touch(e);
+}
+
+/**
+ * «Удалить все данные»: привычки и воздержания — «надгробия», журналы (в т.ч. зикры и восполнение каза) и заметки
+ * очищаются и не вернутся с сервера (метка resetAt), ниййа стирается. Настройки остаются.
+ * keepOld — остаток старого долга каза по намазам: журнал восполнения стирается, поэтому остаток записывается числом.
+ */
+export function resetAll(keepOld = null, now = Date.now()) {
+  update((d) => {
+    for (const x of [...d.habits, ...d.abstain]) if (!x.deleted) tombstone(x);
+    d.logs = {};
+    d.notes = {};
+    d.resetAt = now;
+    d.settings.profile = { ...(d.settings.profile || {}), niyyah: '' };
+    if (keepOld) d.settings.qada = { ...d.settings.qada, old: { ...d.settings.qada?.old, ...keepOld } };
+    d.settings.updatedAt = now;
+  });
 }
 
 /** Удаление — «надгробие», чтобы удаление тоже синхронизировалось. */

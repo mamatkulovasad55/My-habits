@@ -1,6 +1,6 @@
 // Точка входа: экраны, обработчики, живые таймеры.
 import {
-  getData, getLocal, subscribe, update, updateLocal, replaceData, merge, prepareImport, emptyData, touch,
+  getData, getLocal, subscribe, update, updateLocal, replaceData, merge, prepareImport, resetAll, emptyData, touch,
   habitsActive, habitsAll, abstainAll, findHabit, findAbstain, getLog, setLog,
   getStageLog, setStageLog, getEvents, setNote, addEvent, addDhikrRecord, QADA_LOG, reorderHabits, mergeIntoStaged,
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
@@ -15,10 +15,10 @@ import {
   habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
 } from './logic.js';
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
-import { PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel } from './prayer.js';
+import { PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel, tzMismatch, offsetLabel } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
 import { forbiddenWindows } from './logic.js';
-import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS } from './dhikr.js';
+import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS, DHIKR_PENDING_KEY } from './dhikr.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -67,6 +67,7 @@ function render() {
   if (!tg.inTelegram()) return;
   applyTheme();
   const scrollY = window.scrollY;
+  tzRefocus = Boolean(document.activeElement?.matches?.('[data-tz-search]'));
   const prevRoute = view.dataset.route;
   view.dataset.route = state.route + (state.sub ? `/${state.sub}` : '');
   view.innerHTML = { today: viewToday, abstain: viewAbstain, stats: viewStats, profile: viewProfile }[state.route]();
@@ -91,6 +92,7 @@ function route() {
   if (r === 'checkin') {
     history.replaceState(null, '', '#today');
     state.route = 'today';
+    state.sub = null;
     state.day = today();
     render();
     return openCheckin();
@@ -100,6 +102,7 @@ function route() {
   if (sub) while (topSheet()) topSheet().close(); // ссылка «Профиль → …» из шторки
   state.route = name === 'settings' ? 'profile' : ROUTES.includes(name) ? name : 'today';
   state.sub = state.route === 'profile' && PROFILE_SUBS[sub] ? sub : null;
+  if (state.sub !== 'tz') tzQuery = '';
   state.reorder = false;
   render();
 }
@@ -185,6 +188,7 @@ function viewToday() {
     <nav class="week-strip">${strip}</nav>
     ${abstChips}
     ${summary}
+    ${dkey(state.day) === todayKey() && !state.reorder ? tzBanner() : ''}
     ${namazBanner()}
     ${state.reorder ? reorderList() : `
     ${due.length ? `<section class="list">${due.map((h) => habitCard(h, day)).join('')}</section>` : ''}
@@ -215,6 +219,19 @@ function findNamazHabits() {
     for (const [k, list] of Object.entries(NAMAZ_ALIASES)) if (list.includes(n)) found.push({ h, prayer: k });
   }
   return found;
+}
+
+/** Предупреждение: часы телефона идут не по поясу профиля — время намаза и отметки расходятся. */
+function tzBanner() {
+  const st = getData().settings;
+  const mm = tzMismatch(st);
+  if (!mm) return '';
+  const auto = st.tzAuto !== false;
+  return `<section class="card pad banner is-warn">
+    <div class="banner-title">🕰 Часовой пояс не совпадает</div>
+    <p>Телефон живёт по ${offsetLabel(mm.device)}, а в профиле — ${offsetLabel(mm.profile)}${auto && st.prayer.city ? ` (${esc(st.prayer.city)})` : ''}. Время намаза и напоминания считаются по профилю, поэтому отметки «вовремя» могут сдвигаться.</p>
+    <div class="btn-row">${auto ? `<button class="btn btn-primary" data-action="locate-city">📍 Обновить город</button><a class="btn btn-secondary" href="#profile/city">Выбрать город</a>` : `<a class="btn btn-primary" href="#profile/tz">Часовой пояс</a>`}</div>
+  </section>`;
 }
 
 function namazBanner() {
@@ -395,7 +412,7 @@ function choiceSheet({ title, message = '', options }) {
     className: 'sheet-compact',
     render: () => `<div class="sheet-body"><div class="confirm">
       <h3>${esc(title)}</h3>${message ? `<p>${message}</p>` : ''}
-      ${options.map((o, i) => `<button class="btn btn-block ${o.primary ? 'btn-primary' : 'btn-secondary'} choice" data-i="${i}" ${o.color ? `style="--c:${o.color}"` : ''}>${o.label}</button>`).join('')}
+      ${options.map((o, i) => `<button class="btn btn-block ${o.primary ? 'btn-primary' : 'btn-secondary'} choice" data-i="${i}" ${o.color ? `style="--c:${o.color}"` : ''}>${esc(o.label)}</button>`).join('')}
       <button class="btn btn-block btn-plain" data-i="-1">Отмена</button>
     </div></div>`,
     mount: (api) => api.el.querySelectorAll('[data-i]').forEach((b) => (b.onclick = () => {
@@ -412,7 +429,7 @@ function guardForbidden(action) {
   if (!w) return action();
   confirmSheet({
     title: 'Сейчас запретное время',
-    message: `Время ${w.name}а — восполнить лучше после ${w.until}. Если время рассчитано неточно, можно отметить сейчас.`,
+    message: `Время ${esc(w.name)}а — восполнить лучше после ${w.until}. Если время рассчитано неточно, можно отметить сейчас.`,
     confirm: 'Всё равно отметить',
     onConfirm: action,
   });
@@ -430,7 +447,7 @@ function tartibSheet(hint, h, date, s, { undo }) {
   const cur = s.juma ? 'Джума' : s.name;
   choiceSheet({
     title: `Сначала восполни ${what}`,
-    message: `Затем читай ${cur}. Это подсказка: порядок восполнения (тартиб) включён в Профиле → Каза.`,
+    message: `Затем читай ${esc(cur)}. Это подсказка: порядок восполнения (тартиб) включён в Профиле → Каза.`,
     options: [
       { label: 'Восполнил сначала', primary: true, run: () => guardForbidden(() => {
         repayItem(it, Date.now() - 1000); // долг — раньше текущего намаза
@@ -1172,7 +1189,7 @@ function remindersSection(f) {
     <div class="card pad">
       ${f.reminders.map((r, i) => `<div class="reminder-row">${timePicker(r, `r${i}`)}<button class="icon-btn sm danger" data-rdel="${i}" aria-label="Удалить">${icon.close(16)}</button></div>`).join('')}
       <button class="btn btn-secondary" data-e="addReminder">${icon.plus(16)} Напоминание</button>
-      <p class="hint">Приходят от бота в Telegram и не приходят, если привычка уже выполнена. Повторы и тихие часы — в ${profileLink('reminders', 'Профиль → Напоминания')}.</p>
+      <p class="hint">Приходят от бота в Telegram и не приходят, если привычка уже выполнена. Повторы и тихие часы настраиваются в Профиле → Напоминания.</p>
     </div>`;
 }
 
@@ -1597,6 +1614,16 @@ const syncStatusShort = () => {
 const NIYYAH_MAX = 300;
 const THEME_LABEL = { system: 'Как в системе', light: 'Светлая', dark: 'Тёмная' };
 const MADHAB_LABEL = { hanafi: 'Ханафи', shafi: 'Шафии' };
+/** Пояс известен этому браузеру (иначе расчёт времени упадёт). */
+function validTz(tz) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+let tzRefocus = false;
 const deviceTz = () => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
@@ -1673,6 +1700,7 @@ function viewProfile() {
   const archived = habitsAll().filter((h) => h.archived).length;
   return `
     ${profileHead()}
+    ${tzBanner()}
     ${niyyahCard(st)}
 
     <div class="group-title">Личные параметры</div>
@@ -1714,7 +1742,7 @@ function openNiyyahEditor() {
       <header class="sheet-header"><button class="link-btn" data-e="cancel">Отмена</button><strong>Моя ниййа</strong><button class="link-btn strong" data-e="save">Готово</button></header>
       <div class="sheet-body">
         <div class="card pad">
-          <textarea class="field niyyah-input" data-e="text" rows="5" maxlength="${NIYYAH_MAX}" placeholder="Зачем я это делаю">${esc(text)}</textarea>
+          <textarea class="field niyyah-input" data-e="text" rows="5" placeholder="Зачем я это делаю">${esc(text)}</textarea>
           <div class="niyyah-count muted small" data-e="count">${[...text].length} / ${NIYYAH_MAX}</div>
         </div>
         <p class="hint">Видишь только ты. Можно оставить пустым.</p>
@@ -1723,6 +1751,9 @@ function openNiyyahEditor() {
       const q = (k) => api.el.querySelector(`[data-e=${k}]`);
       const ta = q('text');
       ta.oninput = () => {
+        // предел — в символах (эмодзи считается за один), как и счётчик
+        const chars = [...ta.value];
+        if (chars.length > NIYYAH_MAX) ta.value = chars.slice(0, NIYYAH_MAX).join('');
         text = ta.value;
         q('count').textContent = `${[...text].length} / ${NIYYAH_MAX}`;
       };
@@ -1753,28 +1784,38 @@ function citySection() {
 }
 
 let tzQuery = '';
+let tzZonesMemo = null; // список поясов с подписями: считается один раз за день (~400 форматирований)
+const TZ_FALLBACK = ['Asia/Tashkent', 'Asia/Samarkand', 'Asia/Almaty', 'Asia/Bishkek', 'Asia/Dushanbe', 'Asia/Ashgabat', 'Asia/Baku', 'Asia/Tbilisi', 'Asia/Yerevan',
+  'Asia/Dubai', 'Asia/Riyadh', 'Asia/Qatar', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Jakarta', 'Asia/Kuala_Lumpur', 'Asia/Shanghai', 'Asia/Seoul', 'Asia/Tokyo',
+  'Europe/Moscow', 'Europe/Istanbul', 'Europe/Kyiv', 'Europe/Minsk', 'Europe/Berlin', 'Europe/Paris', 'Europe/London', 'Africa/Cairo', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'UTC'];
+/** Для поиска: строчные буквы, любой минус/тире → дефис («utc-5» находит «UTC−5»). */
+const tzNorm = (x) => String(x).toLowerCase().replace(/[−–—]/g, '-');
+
 function tzZones() {
-  let list = [];
+  const day = todayKey();
+  const cur = getData().settings.tz;
+  if (tzZonesMemo?.day === day && (!cur || tzZonesMemo.list.some((x) => x.z === cur))) return tzZonesMemo.list;
+  let ids = [];
   try {
-    list = Intl.supportedValuesOf?.('timeZone') || [];
+    ids = Intl.supportedValuesOf?.('timeZone') || [];
   } catch {
-    list = [];
+    ids = [];
   }
-  if (!list.length) {
-    list = ['Asia/Tashkent', 'Asia/Samarkand', 'Asia/Almaty', 'Asia/Bishkek', 'Asia/Dushanbe', 'Asia/Ashgabat', 'Asia/Baku', 'Asia/Tbilisi', 'Asia/Yerevan',
-      'Asia/Dubai', 'Asia/Riyadh', 'Asia/Qatar', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Jakarta', 'Asia/Kuala_Lumpur', 'Asia/Shanghai', 'Asia/Seoul', 'Asia/Tokyo',
-      'Europe/Moscow', 'Europe/Istanbul', 'Europe/Kyiv', 'Europe/Minsk', 'Europe/Berlin', 'Europe/Paris', 'Europe/London', 'Africa/Cairo', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'UTC'];
-  }
-  const st = getData().settings.tz;
-  if (st && !list.includes(st)) list = [st, ...list];
+  if (!ids.length) ids = TZ_FALLBACK.filter(validTz);
+  if (cur && !ids.includes(cur)) ids = [cur, ...ids];
+  const now = new Date();
+  const list = ids.map((z) => {
+    const name = z.replace(/_/g, ' ');
+    const off = tzLabel(z, now);
+    return { z, name, off, q: tzNorm(`${name} ${off}`) };
+  });
+  tzZonesMemo = { day, list };
   return list;
 }
 
 function tzSection() {
   const st = getData().settings;
   const auto = st.tzAuto !== false;
-  const now = new Date();
-  const zones = tzZones().map((z) => ({ z, name: z.replace(/_/g, ' '), off: tzLabel(z, now) }));
   const check = `<span class="tz-check">${icon.check(18)}</span>`;
   return `<div class="card list-group">
       <button class="row tz-row" data-tz="__auto"><div class="row-main"><b>Автоматически (по городу)</b><span class="muted">${esc(st.prayer.city || '')} · ${esc(tzLabel(cityTz(st, deviceTz()) || st.tz))}</span></div>${auto ? check : ''}</button>
@@ -1783,7 +1824,7 @@ function tzSection() {
     <div class="group-title">Выбрать вручную</div>
     <input class="field" type="search" data-tz-search placeholder="Поиск: Tashkent, Istanbul, UTC+3" value="${esc(tzQuery)}">
     <div class="card list-group mt tz-list">
-      ${zones.map(({ z, name, off }) => `<button class="row tz-row" data-tz="${esc(z)}" data-q="${esc(`${name} ${off}`.toLowerCase())}"><span class="row-main"><b>${esc(name)}</b></span><span class="row-val">${esc(off)}</span>${!auto && z === st.tz ? check : ''}</button>`).join('')}
+      ${tzZones().map(({ z, name, off, q }) => `<button class="row tz-row" data-tz="${esc(z)}" data-q="${esc(q)}"><span class="row-main"><b>${esc(name)}</b></span><span class="row-val">${esc(off)}</span>${!auto && z === st.tz ? check : ''}</button>`).join('')}
     </div>`;
 }
 
@@ -2185,24 +2226,27 @@ function mountPrefs() {
     });
   };
   const geo = view.querySelector('[data-pr=geo]');
-  if (geo) geo.onclick = () => {
-    if (!navigator.geolocation) return toast('Геолокация недоступна');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = Math.round(pos.coords.latitude * 10000) / 10000;
-        const lon = Math.round(pos.coords.longitude * 10000) / 10000;
-        const near = CITIES.map(([n, la, lo]) => [n, Math.hypot(la - lat, lo - lon)]).sort((a, b) => a[1] - b[1])[0];
-        update((d) => {
-          d.settings.prayer = { ...d.settings.prayer, lat, lon, city: near && near[1] < 0.3 ? near[0] : 'Мои координаты' };
-          applyAutoTz(d.settings);
-          d.settings.updatedAt = Date.now();
-        });
-        toast('Координаты обновлены');
-      },
-      () => toast('Не удалось определить местоположение'),
-      { timeout: 10000 },
-    );
-  };
+  if (geo) geo.onclick = locateCity;
+}
+
+/** «Где я»: координаты устройства → ближайший город из списка или свои координаты; в авто-режиме — и пояс. */
+function locateCity() {
+  if (!navigator.geolocation) return toast('Геолокация недоступна — выбери город в Профиле');
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = Math.round(pos.coords.latitude * 10000) / 10000;
+      const lon = Math.round(pos.coords.longitude * 10000) / 10000;
+      const near = CITIES.map(([n, la, lo]) => [n, Math.hypot(la - lat, lo - lon)]).sort((a, b) => a[1] - b[1])[0];
+      update((d) => {
+        d.settings.prayer = { ...d.settings.prayer, lat, lon, city: near && near[1] < 0.3 ? near[0] : 'Мои координаты' };
+        applyAutoTz(d.settings);
+        d.settings.updatedAt = Date.now();
+      });
+      toast(`Город: ${getData().settings.prayer.city} · ${tzValue(getData().settings)}`);
+    },
+    () => toast('Не удалось определить местоположение — выбери город в Профиле'),
+    { timeout: 10000 },
+  );
 }
 
 /** Режим «Автоматически»: пояс следует за городом (для своих координат — пояс устройства). */
@@ -2224,22 +2268,27 @@ function mountTz() {
   const search = view.querySelector('[data-tz-search]');
   if (!search) return;
   const filter = () => {
-    const q = search.value.trim().toLowerCase();
+    const q = tzNorm(search.value.trim());
     tzQuery = search.value;
     view.querySelectorAll('.tz-list [data-tz]').forEach((r) => (r.hidden = Boolean(q) && !r.dataset.q.includes(q)));
   };
   search.oninput = filter;
   if (tzQuery) filter();
+  if (tzRefocus) {
+    // экран перерисовался, пока шёл ввод (например, пришла синхронизация) — вернуть курсор в поиск
+    search.focus({ preventScroll: true });
+    search.setSelectionRange(search.value.length, search.value.length);
+  }
   view.querySelectorAll('[data-tz]').forEach((b) => (b.onclick = () => {
     const z = b.dataset.tz;
     update((d) => {
       if (z === '__auto') {
         d.settings.tzAuto = true;
         applyAutoTz(d.settings);
-      } else {
+      } else if (validTz(z)) {
         d.settings.tzAuto = false;
         d.settings.tz = z;
-      }
+      } else return;
       d.settings.updatedAt = Date.now();
     });
     toast(`Часовой пояс: ${tzValue(getData().settings)}`);
@@ -2296,13 +2345,18 @@ function mountProfile() {
   q('wipe').onclick = () =>
     confirmSheet({
       title: 'Удалить все данные?',
-      message: 'Все привычки, история и таймеры воздержания будут удалены' + ' — в том числе в репозитории.' + ' Сначала можно сделать экспорт.',
+      message: 'Привычки, воздержания, вся история, зикры, заметки и ниййа будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
       confirm: 'Удалить всё',
       destructive: true,
       onConfirm: () => {
-        habitsAll().forEach((h) => removeHabit(h.id));
-        abstainAll().forEach((a) => removeAbstain(a.id));
+        const debt = qadaDebt().byPrayer;
+        resetAll(Object.fromEntries(QADA_KEYS.map((k) => [k, debt[k].oldLeft])));
         updateLocal((l) => (l.timers = {}));
+        try {
+          localStorage.removeItem(DHIKR_PENDING_KEY);
+        } catch {
+          /* ignore */
+        }
         toast('Все данные удалены');
       },
     });
@@ -2803,6 +2857,7 @@ document.addEventListener('click', (e) => {
     case 'reorder': state.reorder = true; return render();
     case 'reorder-done': state.reorder = false; return render();
     case 'checkin': return openCheckin();
+    case 'locate-city': return locateCity();
     case 'merge-namaz': return mergeNamaz();
     case 'hide-namaz':
       try {
