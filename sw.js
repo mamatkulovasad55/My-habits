@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v9';
+const VERSION = 'v10';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
@@ -39,18 +39,25 @@ self.addEventListener('activate', (e) => {
 });
 
 // Сначала сеть (чтобы обновления приходили сразу), при офлайне — кэш.
+// При плохой связи не ждём сеть дольше NET_TIMEOUT: показываем кэш, а ответ сети обновит его в фоне.
+const NET_TIMEOUT = 3000;
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
+  const cached = () => caches.match(e.request, { ignoreSearch: true });
+  const network = fetch(e.request).then((res) => {
+    if (res.ok) {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(e.request, copy));
+    }
+    return res;
+  });
+  const slow = new Promise((resolve) => setTimeout(resolve, NET_TIMEOUT)).then(cached);
   e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match('./index.html'))),
+    Promise.race([network.catch(() => undefined), slow])
+      .then((res) => res || network) // кэша нет — всё-таки дождаться сети
+      .catch(() => cached().then((r) => r || caches.match('./index.html'))),
   );
+  e.waitUntil(network.catch(() => {}));
 });

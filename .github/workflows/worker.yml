@@ -32,7 +32,10 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.check.outputs.skip != 'true'
         with:
-          node-version: 20
+          node-version: 22
+      - name: Tests
+        if: steps.check.outputs.skip != 'true'
+        run: node tests/run.mjs
       - name: Install wrangler
         if: steps.check.outputs.skip != 'true'
         run: npm install -g wrangler@3.114.0
