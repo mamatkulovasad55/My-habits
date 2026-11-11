@@ -34,6 +34,7 @@ export function defaultSettings() {
     forbidden: { sunrise: 15, zenith: 10, sunset: 15 },
     // порядок восполнения (сахиб ат-тартиб); limit/countVitr — уточняются у имама
     tartib: { enabled: false, limit: 6, countOld: false, countVitr: true, asked: false },
+    dhikr: { target: 33, haptics: true, last: 'subhanallah' }, // счётчик зикров: цель (0 — без цели), вибрация, последний зикр
   };
 }
 
@@ -65,6 +66,7 @@ function normalizeSettings(s) {
     hijri: { ...d.hijri, ...(s.hijri || {}), offsets: Array.isArray(s.hijri?.offsets) ? s.hijri.offsets : [] },
     forbidden: { ...d.forbidden, ...(s.forbidden || {}) },
     tartib: { ...d.tartib, ...(s.tartib || {}) },
+    dhikr: { ...d.dhikr, ...(s.dhikr || {}) },
   };
 }
 
@@ -269,6 +271,20 @@ export function setLog(hid, day, v) {
 /** Установить значение этапа. */
 export function setStageLog(hid, day, sid, v, k = '', ts = Date.now()) {
   addEvent(hid, day, Math.max(0, v) - getStageLog(hid, day, sid), sid, ts, k);
+}
+
+/** Записать подход зикра одной записью: { k: 'dhikr', s: id зикра, n, d: n }. */
+export function addDhikrRecord(day, dhikrId, n, ts = Date.now()) {
+  n = Math.floor(Number(n) || 0);
+  if (n <= 0) return;
+  update((d) => {
+    d.logs.__dhikr = d.logs.__dhikr || {};
+    const e = d.logs.__dhikr[day];
+    const ev = [...entryEvents(e), { id: uid(), ts, d: n, s: dhikrId, k: 'dhikr', n }];
+    const next = { ev, t: Date.now() };
+    next.v = entryValue(next);
+    d.logs.__dhikr[day] = next;
+  });
 }
 
 /** Ключ журнала восполнения старых долгов каза. */

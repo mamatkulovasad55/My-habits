@@ -2,7 +2,7 @@
 import {
   getData, getLocal, subscribe, update, updateLocal, replaceData, merge, emptyData, touch,
   habitsActive, habitsAll, abstainAll, findHabit, findAbstain, getLog, setLog,
-  getStageLog, setStageLog, getEvents, setNote, addEvent, QADA_LOG, reorderHabits, mergeIntoStaged,
+  getStageLog, setStageLog, getEvents, setNote, addEvent, addDhikrRecord, QADA_LOG, reorderHabits, mergeIntoStaged,
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
@@ -18,6 +18,7 @@ import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHo
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
 import { forbiddenWindows } from './logic.js';
+import { createCounter, recoverPending, dhikrTotals, dhikrSums, DHIKR_TARGETS } from './dhikr.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
@@ -170,6 +171,7 @@ function viewToday() {
       </div>
       <div class="head-actions">
         ${!isToday ? `<button class="pill" data-action="go-today">Сегодня</button>` : ''}
+        <button class="icon-btn dhikr-btn" data-action="open-dhikr" aria-label="Зикр">📿</button>
         <button class="icon-btn" data-action="add-habit" aria-label="Новая привычка">${icon.plus(22)}</button>
       </div>
       <input type="date" id="date-picker" class="visually-hidden" max="${todayKey()}" value="${key}" tabindex="-1">
@@ -1542,6 +1544,7 @@ function viewStats() {
     <div class="group-title">Привычки · за 30 дней</div>
     <div class="card list-group">${habitRows}</div>` : ''}
     ${abst.length ? `<div class="group-title">Воздержание</div><div class="card list-group">${abstRows}</div>` : ''}
+    ${dhikrStatsSection()}
     <div class="group-title">Достижения · ${unlocked} из ${ach.list.length}</div>
     <div class="ach-grid">${ach.list.map((x) => `<div class="ach ${x.ok ? 'is-ok' : ''}"><div class="ach-emoji">${x.emoji}</div><b>${esc(x.title)}</b><span>${esc(x.desc)}</span></div>`).join('')}</div>
   `;
@@ -2182,6 +2185,213 @@ async function renderGate() {
 }
 
 // ============================================================
+// Зикры
+// ============================================================
+
+let DHIKR = null; // data/dhikr.json
+const loadDhikr = () => (DHIKR ? Promise.resolve(DHIKR) : fetch('./data/dhikr.json').then((r) => r.json()).then((x) => (DHIKR = x)));
+const fmtInt = (n) => Number(n || 0).toLocaleString('ru-RU');
+let dhikrCounter = null;
+
+function safeStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Запуск приложения: незаписанный подход (Telegram закрыли посреди счёта) — в журнал. */
+function recoverDhikr() {
+  const n = recoverPending(safeStorage(), addDhikrRecord);
+  if (n) toast(`Зикр: сохранён незаписанный подход (${n})`);
+}
+
+/** Записать текущий подход (сворачивание, закрытие, «Готово», смена зикра). */
+function commitDhikr() {
+  dhikrCounter?.commit();
+}
+document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && commitDhikr());
+window.addEventListener('pagehide', commitDhikr);
+
+async function openDhikr() {
+  let list;
+  try {
+    list = await loadDhikr();
+  } catch {
+    return toast('Не удалось загрузить зикры');
+  }
+  const st = () => getData().settings.dhikr || {};
+  const startId = list.some((x) => x.id === st().last) ? st().last : list[0].id;
+  const counter = createCounter({ storage: safeStorage(), record: addDhikrRecord, id: startId });
+  dhikrCounter = counter;
+  let reached = false;
+  const cur = () => list.find((x) => x.id === counter.id) || list[0];
+  const todayOf = (id) => (dhikrTotals(getData(), todayKey()).byId[id] || 0) + (counter.id === id ? counter.n : 0);
+
+  const api = openSheet({
+    className: 'sheet-full dhikr-sheet',
+    swipe: false,
+    onClose: () => {
+      counter.commit();
+      if (dhikrCounter === counter) dhikrCounter = null;
+    },
+    render: () => {
+      const d = cur();
+      const target = Number(st().target) || 0;
+      return `
+      <header class="sheet-header">
+        <button class="link-btn" data-z="menu" aria-label="Настройки счётчика">•••</button>
+        <strong>Зикр</strong>
+        <button class="icon-btn sm" data-z="close" aria-label="Закрыть">${icon.close(18)}</button>
+      </header>
+      <div class="dhikr-body">
+        <div class="dhikr-tabs">${segmented('dhikr', list.map((x) => ({ value: x.id, label: x.title })), d.id)}</div>
+        <div class="dhikr-text" data-z="text">
+          <div class="dhikr-ar" dir="rtl" lang="ar">${esc(d.arabic)}</div>
+          <div class="dhikr-tr">${esc(d.translit)}</div>
+          <div class="dhikr-ru">${esc(d.ru)}</div>
+        </div>
+        <div class="dhikr-pad" data-z="pad" role="button" aria-label="Нажми, чтобы посчитать">
+          ${target ? `<div class="dhikr-goal"><div class="dhikr-bar"><div data-z="bar"></div></div><span data-z="goal">${target}</span></div>` : '<div class="dhikr-goal"></div>'}
+          <div class="dhikr-count" data-z="count">0</div>
+          <div class="dhikr-today" data-z="today"></div>
+        </div>
+        <div class="dhikr-actions">
+          <button class="btn btn-secondary" data-z="reset">Сбросить</button>
+          <button class="btn btn-primary" data-z="done">Готово</button>
+        </div>
+      </div>`;
+    },
+    mount: (a) => {
+      const q = (k) => a.el.querySelector(`[data-z=${k}]`);
+      const countEl = q('count');
+      const barEl = q('bar');
+      const goalEl = q('goal');
+      const todayEl = q('today');
+      const target = Number(st().target) || 0;
+      const paint = () => {
+        const v = counter.shown;
+        countEl.textContent = v;
+        if (barEl) barEl.style.width = `${Math.min(100, (v / target) * 100)}%`;
+        if (goalEl) goalEl.textContent = v >= target ? `${target} ✓` : String(target);
+        a.el.querySelector('.dhikr-goal')?.classList.toggle('is-done', target > 0 && v >= target);
+        todayEl.textContent = `Сегодня всего: ${fmtInt(todayOf(counter.id))}`;
+      };
+      reached = target > 0 && counter.shown >= target;
+      paint();
+      const pad = q('pad');
+      pad.addEventListener('pointerdown', (e) => {
+        if (e.button > 0) return;
+        e.preventDefault();
+        const v = counter.tap();
+        const haptics = st().haptics !== false;
+        if (target && v >= target && !reached) {
+          reached = true;
+          if (haptics) {
+            tg.haptic('heavy');
+            tg.haptic('success');
+          }
+        } else if (haptics) tg.haptic('light');
+        paint();
+        pad.classList.remove('is-tap');
+        void pad.offsetWidth; // перезапуск короткой анимации нажатия
+        pad.classList.add('is-tap');
+      });
+      pad.addEventListener('contextmenu', (e) => e.preventDefault());
+      const switchTo = (id) => {
+        if (id === counter.id) return;
+        counter.switchTo(id);
+        reached = false;
+        setSetting('dhikr.last', id);
+        a.refresh();
+      };
+      a.el.querySelectorAll('[data-seg=dhikr] button').forEach((b) => (b.onclick = () => switchTo(b.dataset.value)));
+      // свайп по тексту — следующий / предыдущий зикр
+      const text = q('text');
+      let sx = null;
+      text.addEventListener('touchstart', (e) => (sx = e.touches[0].clientX), { passive: true });
+      text.addEventListener('touchend', (e) => {
+        if (sx == null) return;
+        const dx = e.changedTouches[0].clientX - sx;
+        sx = null;
+        if (Math.abs(dx) < 50) return;
+        const i = list.findIndex((x) => x.id === counter.id);
+        const next = list[(i + (dx < 0 ? 1 : -1) + list.length) % list.length];
+        switchTo(next.id);
+      });
+      q('close').onclick = () => a.close();
+      q('done').onclick = () => {
+        const n = counter.n;
+        a.close();
+        if (n) toast(`${cur().title}: записано ${fmtInt(n)}`);
+      };
+      q('reset').onclick = () => {
+        if (!counter.shown) return;
+        confirmSheet({
+          title: 'Сбросить счёт?',
+          message: counter.n ? `Текущий счёт ${fmtInt(counter.n)} не будет записан.` : 'Счётчик начнётся с нуля (записанное остаётся в статистике).',
+          confirm: 'Сбросить',
+          destructive: true,
+          onConfirm: () => {
+            counter.reset();
+            reached = false;
+            paint();
+          },
+        });
+      };
+      q('menu').onclick = () => openDhikrMenu(() => a.refresh());
+    },
+  });
+  return api;
+}
+
+function openDhikrMenu(onChange) {
+  const st = () => getData().settings.dhikr || {};
+  openSheet({
+    className: 'sheet-compact',
+    render: () => `
+      <header class="sheet-header"><span></span><strong>Счётчик</strong><button class="link-btn strong" data-m="ok">Готово</button></header>
+      <div class="sheet-body">
+        <div class="group-title">Цель</div>
+        <div class="card pad">${segmented('dtarget', DHIKR_TARGETS.map((t) => ({ value: String(t), label: t ? String(t) : 'Без цели' })), String(Number(st().target) || 0))}</div>
+        <div class="card pad mt">
+          <label class="switch-row"><span>Вибрация</span><input type="checkbox" class="switch" data-m="haptics" ${st().haptics !== false ? 'checked' : ''}></label>
+        </div>
+      </div>`,
+    mount: (api) => {
+      api.el.querySelectorAll('[data-seg=dtarget] button').forEach((b) => (b.onclick = () => {
+        setSetting('dhikr.target', Number(b.dataset.value));
+        api.refresh();
+        onChange();
+      }));
+      api.el.querySelector('[data-m=haptics]').onchange = (e) => setSetting('dhikr.haptics', e.target.checked);
+      api.el.querySelector('[data-m=ok]').onclick = () => api.close();
+    },
+  });
+}
+
+function dhikrStatsSection() {
+  if (!DHIKR) {
+    loadDhikr().then(() => state.route === 'stats' && render()).catch(() => {});
+    return '';
+  }
+  const data = getData();
+  const t = today();
+  const d0 = dhikrTotals(data, todayKey());
+  const d7 = dhikrSums(data, t, 7);
+  const d30 = dhikrSums(data, t, 30);
+  if (!d30.total) return '';
+  const rows = DHIKR.map((x) => `<div class="dhikr-row"><b>${esc(x.title)}</b><span>${fmtInt(d0.byId[x.id])}</span><span>${fmtInt(d7.byId[x.id])}</span><span>${fmtInt(d30.byId[x.id])}</span></div>`).join('');
+  return `<div class="group-title">Зикры</div>
+    <div class="card pad dhikr-stats">
+      <div class="dhikr-row th"><span></span><span>Сегодня</span><span>7 дней</span><span>30 дней</span></div>
+      ${rows}
+      <div class="dhikr-row total"><b>Всего</b><span>${fmtInt(d0.total)}</span><span>${fmtInt(d7.total)}</span><span>${fmtInt(d30.total)}</span></div>
+    </div>`;
+}
+
+// ============================================================
 // События
 // ============================================================
 
@@ -2191,6 +2401,7 @@ document.addEventListener('click', (e) => {
   const id = t.dataset.id;
   switch (t.dataset.action) {
     case 'add-habit': return openHabitEditor();
+    case 'open-dhikr': return openDhikr();
     case 'open-habit': return openHabitDetail(id);
     case 'habit-tap': e.stopPropagation(); return habitTap(id);
     case 'select-day': state.day = parseKey(t.dataset.day); return render();
@@ -2292,6 +2503,8 @@ if (!tg.inTelegram()) {
 } else {
   tg.init({ onBack: () => topSheet()?.close(), onTheme: applyTheme });
   route();
+  recoverDhikr();
+  window.Telegram?.WebApp?.onEvent?.('deactivated', commitDhikr);
   sync.initSync();
   if (tg.startScreen() === 'checkin') setTimeout(openCheckin, 300);
 }

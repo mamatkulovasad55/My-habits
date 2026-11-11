@@ -150,7 +150,7 @@ const sheets = [];
  * Открыть шторку. render() возвращает HTML; если live=true —
  * содержимое перерисовывается при изменении данных.
  */
-export function openSheet({ render, mount, live = false, className = '' }) {
+export function openSheet({ render, mount, live = false, className = '', onClose, swipe = true }) {
   const backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
   const el = document.createElement('div');
@@ -175,7 +175,13 @@ export function openSheet({ render, mount, live = false, className = '' }) {
     },
     close() {
       const i = sheets.indexOf(api);
-      if (i >= 0) sheets.splice(i, 1);
+      if (i < 0) return;
+      sheets.splice(i, 1);
+      try {
+        onClose?.();
+      } catch (e) {
+        console.error(e);
+      }
       tg.backButton(sheets.length > 0);
       backdrop.classList.remove('is-open');
       el.classList.add('is-closing');
@@ -192,7 +198,7 @@ export function openSheet({ render, mount, live = false, className = '' }) {
   backdrop.addEventListener('mousedown', (e) => {
     if (e.target === backdrop) api.close();
   });
-  enableSwipeToClose(el, api);
+  if (swipe) enableSwipeToClose(el, api);
   return api;
 }
 
