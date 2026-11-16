@@ -2474,7 +2474,7 @@ function pinPadHTML(pin, bioAttr = '') {
   const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'bio', '0', 'del'];
   const key = (k) => {
     if (k === 'bio') return bioAttr ? `<button class="pin-key is-text" ${bioAttr}>${esc(bioLabel())}</button>` : '<span></span>';
-    return `<button class="pin-key ${k === 'del' ? 'is-text' : ''}" data-pin="${k}" aria-label="${k === 'del' ? 'Стереть' : k}">${k === 'del' ? '⌫' : k}</button>`;
+    return `<button class="pin-key ${k === 'del' ? 'is-text' : ''}" data-pin="${k}" aria-label="${k === 'del' ? 'Стереть' : k}">${k === 'del' ? icon.backspace(28) : k}</button>`;
   };
   return `<div class="pin-dots" aria-hidden="true">${Array.from({ length: PIN_LEN }, (_, i) => `<i class="${i < pin.length ? 'is-on' : ''}"></i>`).join('')}</div>
     <div class="pin-pad">${keys.map(key).join('')}</div>`;
@@ -2513,16 +2513,16 @@ function lockMessage() {
 }
 
 function lockScreen() {
-  const head = `<header class="page-head"><div><h1>Детокс</h1></div></header>`;
+  // без заголовка раздела: только замок и клавиатура по центру экрана
   if (lockUi.hasCode === false) {
-    return `${head}<div class="lock-screen">
-      <div class="lock-icon">🔑</div><h2>Код сброшен</h2>
+    return `<div class="lock-screen">
+      <div class="lock-icon">${icon.key(28)}</div><h2>Код сброшен</h2>
       <p class="muted">Задай новый код — данные на месте.</p>
       <button class="btn btn-primary" data-action="lock-newcode">Задать новый код</button>
     </div>`;
   }
-  return `${head}<div class="lock-screen">
-    <div class="lock-icon">🔒</div><h2>Раздел защищён</h2>
+  return `<div class="lock-screen">
+    <div class="lock-icon">${icon.lock(28)}</div><h2>Раздел защищён</h2>
     <p class="lock-msg ${lockUi.err ? 'is-err' : ''}" data-lock-msg>${lockMessage()}</p>
     ${pinPadHTML(lockUi.pin, bioEnabled() ? 'data-action="lock-bio"' : '')}
     ${lockUi.waitReset > Date.now() ? '<p class="hint center">Нажми «Сбросить код» в чате с ботом — экран обновится сам</p>' : '<button class="link-btn small lock-forgot" data-action="lock-forgot">Забыл код</button>'}

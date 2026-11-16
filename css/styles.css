@@ -1383,35 +1383,46 @@ body.is-gate .tabbar { display: none; }
 body:has(.storage-warn) .toast { bottom: calc(var(--tabbar-h) + var(--safe-b) + 128px); }
 body:has(.storage-warn) .view { padding-bottom: calc(var(--tabbar-h) + var(--safe-b) + 140px); }
 
-/* ---------- Защита «Воздержания»: экран блокировки и клавиатура кода ---------- */
+/* ---------- Защита «Детокса»: экран блокировки и клавиатура кода (как экран код-пароля iOS) ---------- */
 
 .lock-screen, .lock-sheet { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.lock-screen { padding: 0 0 8px; }
-.lock-screen h2 { margin: 6px 0 2px; font-size: var(--ios-title-2); letter-spacing: var(--ios-title-2-ls); line-height: var(--ios-title-2-lh); }
-.lock-icon { font-size: 38px; line-height: 1; }
-.lock-msg { margin: 4px 0 12px; min-height: 22px; color: var(--label-2); font-size: var(--ios-subheadline); line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
+.lock-screen {
+  /* по центру видимой области над панелью вкладок */
+  min-height: calc(100dvh - var(--safe-t) - var(--safe-b) - var(--tabbar-h) - 44px);
+  justify-content: center;
+  padding: 8px 0;
+}
+.lock-screen h2 { margin: 14px 0 2px; font-size: var(--ios-title-2); font-weight: 700; letter-spacing: var(--ios-title-2-ls); line-height: var(--ios-title-2-lh); }
+.lock-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+.lock-msg { margin: 4px 0 22px; min-height: 22px; color: var(--label-2); font-size: var(--ios-subheadline); line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
 .lock-msg.is-err { color: var(--orange); }
 .lock-msg b { font-variant-numeric: tabular-nums; }
-.pin-dots { display: flex; gap: 16px; margin: 2px 0 18px; }
-.pin-dots i { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--label-2); transition: background 0.12s; }
-.pin-dots i.is-on { background: var(--label); border-color: var(--label); }
-.pin-pad { display: grid; grid-template-columns: repeat(3, 70px); gap: 12px 22px; justify-content: center; }
+.pin-dots { display: flex; gap: 22px; margin: 0 0 30px; }
+.pin-dots i { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--label); transition: background 0.12s; }
+.pin-dots i.is-on { background: var(--label); }
+.pin-pad { display: grid; grid-template-columns: repeat(3, 78px); gap: 16px 26px; justify-content: center; }
 .pin-key {
-  width: 70px; height: 70px; border-radius: 50%;
-  background: var(--fill); color: var(--label);
-  font-size: 28px; font-weight: 400; font-variant-numeric: tabular-nums;
+  width: 78px; height: 78px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--label) 10%, transparent); color: var(--label);
+  font-size: 34px; font-weight: 400; font-variant-numeric: tabular-nums;
   transition: background 0.12s, transform 0.08s;
 }
-.pin-key:active { background: var(--fill-2); transform: scale(0.94); }
-.pin-key.is-text { background: transparent; font-size: var(--ios-subheadline); font-weight: 500; letter-spacing: var(--ios-subheadline-ls); }
-.pin-key[data-pin=del] { font-size: 24px; }
-.lock-forgot { margin-top: 10px; }
+.pin-key:active { background: color-mix(in srgb, var(--label) 28%, transparent); transform: scale(0.96); }
+.pin-key.is-text { background: transparent; font-size: var(--ios-callout); font-weight: 400; letter-spacing: var(--ios-callout-ls); }
+.pin-key.is-text:active { background: color-mix(in srgb, var(--label) 10%, transparent); }
+.lock-forgot { margin-top: 18px; }
 .lock-sheet { padding: 8px 0 4px; }
 .lock-plate { display: flex; align-items: center; gap: 12px; color: var(--label); text-decoration: none; }
 .lock-plate > span:first-child { font-size: 22px; }
 .lock-plate > span:nth-child(2) { flex: 1; }
 .lock-plate svg { color: var(--label-3); }
-@media (max-height: 700px), (max-width: 360px) { .pin-pad { grid-template-columns: repeat(3, 60px); gap: 10px 20px; } .pin-key { width: 60px; height: 60px; font-size: 25px; } .lock-icon { display: none; } }
+@media (max-height: 700px), (max-width: 360px) { .pin-pad { grid-template-columns: repeat(3, 64px); gap: 10px 22px; } .pin-key { width: 64px; height: 64px; font-size: 28px; } .pin-dots { margin-bottom: 18px; } .lock-icon { display: none; } }
 
 /* ---------- Достижения в Профиле ---------- */
 
