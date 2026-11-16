@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v27';
+const VERSION = 'v28';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
@@ -32,7 +32,8 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' — мимо HTTP-кэша браузера: иначе новая версия могла сохранить старые файлы
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -51,7 +52,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   const cached = () => caches.match(e.request, { ignoreSearch: true });
-  const network = fetch(e.request).then((res) => {
+  // GitHub Pages отдаёт файлы с max-age=600: обычный fetch брал бы из HTTP-кэша браузера скрипты
+  // десятиминутной давности (вкладка уже новая, а экран — старый). no-cache — перепроверка у сервера (304, если не менялось).
+  const req = e.request.mode === 'navigate' ? e.request : new Request(e.request, { cache: 'no-cache' });
+  const network = fetch(req).then((res) => {
     if (res.ok) {
       const copy = res.clone();
       caches.open(CACHE).then((c) => c.put(e.request, copy));
