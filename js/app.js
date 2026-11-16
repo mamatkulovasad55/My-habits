@@ -556,7 +556,7 @@ function habitCard(h, day) {
     ${ring(v / g, { size: 46, stroke: 4.5, color: h.color, key: `h-${h.id}-${key}`, inner: `<span class="emoji">${esc(h.emoji)}</span>` })}
     <div class="hmain">
       <div class="hname">${esc(h.name)}</div>
-      <div class="hsub">${sub.join('<span class="dot">·</span>')}</div>
+      <div class="hsub">${sub.map((x, i) => `<span class="seg">${x}${i < sub.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join(' ')}</div>
     </div>
     ${action}
   </article>`;
@@ -598,7 +598,7 @@ function stagedCard(h, day) {
     ${ring(v / g, { size: 46, stroke: 4.5, color: h.color, key: `h-${h.id}-${key}`, inner: `<span class="emoji">${esc(h.emoji)}</span>` })}
     <div class="hmain">
       <div class="hname">${esc(h.name)}</div>
-      <div class="hsub">${sub.join('<span class="dot">·</span>')}</div>
+      <div class="hsub">${sub.map((x, i) => `<span class="seg">${x}${i < sub.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join(' ')}</div>
       ${stageDots(h, day)}
     </div>
     ${action}
