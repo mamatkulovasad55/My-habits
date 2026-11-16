@@ -187,19 +187,19 @@ async function lockApi(env, path, body, owner) {
     // проверка текущего кода с лимитом попыток (verify и смена кода)
     const check = async (code) => {
       const wait = retryIn(rec, now);
-      if (wait) return { res: json({ ok: false, ...lockState(rec, now), error: 'Подожди и попробуй снова' }, 429) };
+      if (wait) return { res: json({ ok: false, reason: 'pause', ...lockState(rec, now), error: 'Подожди и попробуй снова' }) };
       const r = await checkCode(rec, code, env.BOT_TOKEN, now);
       await saveLock(env, { ...r.rec, nonce: r.ok ? undefined : rec.nonce, nonceExp: r.ok ? undefined : rec.nonceExp });
-      return r.ok ? { ok: true } : { res: json({ ok: false, ...lockState(r.rec, now), error: 'Неверный код' }, 403) };
+      return r.ok ? { ok: true } : { res: json({ ok: false, reason: 'wrong', ...lockState(r.rec, now), error: 'Неверный код' }) };
     };
 
     if (path === '/api/lock/verify') {
-      if (!hasCode(rec)) return json({ ok: false, hasCode: false, retryIn: 0, error: 'Код не задан' }, 409);
+      if (!hasCode(rec)) return json({ ok: false, reason: 'nocode', hasCode: false, retryIn: 0, error: 'Код не задан' });
       const r = await check(body.code);
       return r.ok ? json({ ok: true, hasCode: true, retryIn: 0 }) : r.res;
     }
     if (path === '/api/lock/set') {
-      if (!validCode(body.code)) return json({ error: 'Код — 4 цифры' }, 400);
+      if (!validCode(body.code)) return json({ ok: false, reason: 'invalid', error: 'Код — 4 цифры' });
       if (hasCode(rec)) {
         const r = await check(body.current);
         if (!r.ok) return r.res;
@@ -209,7 +209,7 @@ async function lockApi(env, path, body, owner) {
     }
     if (path === '/api/lock/clear') {
       // выключение защиты или смена кода по биометрии: клиент уже подтвердил человека (защита на уровне интерфейса)
-      if (retryIn(rec, now)) return json({ ok: false, ...lockState(rec, now), error: 'Подожди и попробуй снова' }, 429);
+      if (retryIn(rec, now)) return json({ ok: false, reason: 'pause', ...lockState(rec, now), error: 'Подожди и попробуй снова' });
       await saveLock(env, { forgotAt: rec.forgotAt || 0 });
       return json({ ok: true, hasCode: false, retryIn: 0 });
     }

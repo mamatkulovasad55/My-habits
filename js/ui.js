@@ -240,7 +240,12 @@ function enableSwipeToClose(el, api) {
 export const refreshLiveSheets = () => sheets.forEach((s) => s.live && s.refresh());
 export const topSheet = () => sheets[sheets.length - 1];
 /** Закрыть шторки защищённого раздела (при повторной блокировке). */
-export const closePrivateSheets = () => [...sheets].filter((s) => s.private).forEach((s) => s.close());
+export function closePrivateSheets(all = false) {
+  // всё, что открыто поверх шторки раздела (подтверждение удаления, срыва), тоже закрывается
+  const i = all ? 0 : sheets.findIndex((s) => s.private);
+  if (i < 0) return;
+  [...sheets.slice(i)].reverse().forEach((s) => s.close());
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && sheets.length) sheets[sheets.length - 1].close();

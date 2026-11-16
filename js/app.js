@@ -2570,6 +2570,7 @@ function lockForgot() {
     confirm: 'Прислать в бота',
     onConfirm: async () => {
       const r = await lockCall('/api/lock/forgot');
+      if (r.ok && r.hasCode === false) return (lockUi.hasCode = false), render();
       toast(r.ok ? (r.sent === false ? r.error : 'Сообщение отправлено — открой чат с ботом') : r.error || 'Не получилось');
     },
   });
@@ -2670,7 +2671,7 @@ function openSetCode({ needCurrent = false, title = 'Код раздела', onD
         tg.haptic('warning');
         if (r.retryIn) st.until = Date.now() + r.retryIn * 1000;
         // неверный текущий код — заново с него; иначе — с нового
-        Object.assign(st, { step: needCurrent && !st.viaBio && r.status === 403 ? 'current' : 'new', first: '', err: r.error || 'Не получилось' });
+        Object.assign(st, { step: needCurrent && !st.viaBio && (r.reason === 'wrong' || r.reason === 'pause') ? 'current' : 'new', first: '', err: r.error || 'Не получилось' });
         api.refresh();
       });
     },
@@ -2760,7 +2761,7 @@ function mountPrivacy() {
 
 onLockChange((locked) => {
   resetLockUi();
-  if (locked) closePrivateSheets(); // открытая карточка воздержания закрывается
+  if (locked) closePrivateSheets(state.route === 'abstain'); // шторки раздела (и всё поверх них) закрываются; на самой вкладке — все
   render();
 });
 
@@ -3367,7 +3368,7 @@ if (!tg.inTelegram()) {
   window.Telegram?.WebApp?.onEvent?.('deactivated', () => noteLeave());
   window.Telegram?.WebApp?.onEvent?.('activated', () => checkRelock());
   document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? noteLeave() : checkRelock()));
-  bioInit().then(() => state.route === 'profile' && render());
+  bioInit().then(() => (state.route === 'profile' || (state.route === 'abstain' && isLocked())) && render());
   sync.initSync();
   if (tg.startScreen() === 'checkin') setTimeout(openCheckin, 300);
 }

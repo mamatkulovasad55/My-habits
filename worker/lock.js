@@ -25,9 +25,9 @@ async function pepper(botToken) {
 }
 
 /** PBKDF2-SHA256(code + перец, соль) → base64. */
-export async function hashCode(code, salt, botToken) {
+export async function hashCode(code, salt, botToken, iterations = ITERATIONS) {
   const key = await crypto.subtle.importKey('raw', enc.encode(`${code}:${await pepper(botToken)}`), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: unb64(salt), iterations: ITERATIONS, hash: 'SHA-256' }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: unb64(salt), iterations, hash: 'SHA-256' }, key, 256);
   return b64(new Uint8Array(bits));
 }
 
@@ -63,6 +63,6 @@ export function afterFail(rec, now) {
 /** Проверить код. Возвращает { ok, rec } — rec нужно сохранить. */
 export async function checkCode(rec, code, botToken, now) {
   if (!hasCode(rec) || !validCode(code)) return { ok: false, rec: hasCode(rec) ? afterFail(rec, now) : rec };
-  const ok = sameString(await hashCode(code, rec.salt, botToken), rec.hash);
+  const ok = sameString(await hashCode(code, rec.salt, botToken, Number(rec.iter) || ITERATIONS), rec.hash); // число итераций — из записи
   return { ok, rec: ok ? { ...rec, fails: 0, until: 0 } : afterFail(rec, now) };
 }

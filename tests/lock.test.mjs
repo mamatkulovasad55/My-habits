@@ -45,16 +45,24 @@ async function hook(update) {
 
 // 1. Задать код
 assert.deepEqual(await call('/api/lock/status'), { status: 200, hasCode: false, retryIn: 0 });
-assert.equal((await call('/api/lock/set', { code: '12a4' })).status, 400, 'только 4 цифры');
-assert.equal((await call('/api/lock/set', { code: '12345' })).status, 400);
+assert.equal((await call('/api/lock/set', { code: '12a4' })).reason, 'invalid', 'только 4 цифры');
+assert.equal((await call('/api/lock/set', { code: '12345' })).reason, 'invalid');
 assert.equal((await call('/api/lock/set', { code: '2580' })).ok, true);
 assert.equal((await call('/api/lock/status')).hasCode, true);
 const rec = JSON.parse(KV.map.get(LOCK_KEY));
 assert.ok(rec.hash && rec.salt && !JSON.stringify(rec).includes('2580'), 'в KV только хеш');
-assert.equal((await call('/api/lock/set', { code: '1111' })).status, 403, 'смена — только с текущим кодом');
+assert.equal((await call('/api/lock/set', { code: '1111' })).reason, 'wrong', 'смена — только с текущим кодом');
 assert.equal((await call('/api/lock/set', { code: '1111', current: '2580' })).ok, true);
 assert.equal((await call('/api/lock/set', { code: '2580', current: '1111' })).ok, true);
-console.log('✓ код: только 4 цифры, в KV — хеш с солью, смена — с текущим кодом');
+{
+  const { makeRecord, checkCode } = await import('../worker/lock.js');
+  const old = { ...(await makeRecord('5555', BOT)), iter: 20000 };
+  const { hashCode } = await import('../worker/lock.js');
+  old.hash = await hashCode('5555', old.salt, BOT, 1000);
+  old.iter = 1000; // запись со старым числом итераций по-прежнему проверяется
+  assert.equal((await checkCode(old, '5555', BOT, 0)).ok, true);
+}
+console.log('✓ код: только 4 цифры, в KV — хеш с солью, смена — с текущим кодом, число итераций — из записи');
 
 // 2. Чужой аккаунт
 assert.equal((await call('/api/lock/verify', { code: '2580' }, STRANGER)).code, 'foreign');
@@ -65,13 +73,15 @@ console.log('✓ чужой аккаунт: отказ');
 assert.equal((await call('/api/lock/verify', { code: '2580' })).ok, true);
 for (let i = 1; i <= 4; i++) {
   const r = await call('/api/lock/verify', { code: '0000' });
-  assert.equal(r.status, 403);
+  assert.equal(r.reason, 'wrong');
+  assert.equal(r.status, 200, 'без HTTP-ошибки (не шумит в консоли)');
   assert.equal(r.retryIn, 0, `ошибка ${i} — без паузы`);
 }
 let r = await call('/api/lock/verify', { code: '0000' });
 assert.equal(r.retryIn, 30, '5-я ошибка → 30 с');
 r = await call('/api/lock/verify', { code: '2580' });
-assert.equal(r.status, 429, 'во время паузы даже верный код не проверяется');
+assert.equal(r.reason, 'pause', 'во время паузы даже верный код не проверяется');
+assert.equal(r.ok, false);
 // «перезапуск мини-аппа» — новый запрос статуса видит ту же паузу (она на сервере)
 T += 10e3;
 setNow(T);
