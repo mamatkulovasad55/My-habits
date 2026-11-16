@@ -158,7 +158,7 @@ function viewToday() {
   const allDone = s.total > 0 && s.done === s.total;
   const summary = habits.length
     ? `<section class="card summary">
-        ${ring(s.ratio ?? 0, { size: 92, stroke: 10, key: 'summary', color: 'var(--green)', inner: `<span class="summary-pct">${s.total ? Math.round((s.ratio || 0) * 100) : 0}<small>%</small></span>` })}
+        ${ring(s.ratio ?? 0, { size: 92, stroke: 10, key: 'summary', color: 'var(--green)', inner: summaryPct(s.total ? Math.round((s.ratio || 0) * 100) : 0) })}
         <div class="summary-text">
           <div class="summary-title">${allDone ? 'Все цели выполнены' : s.total ? `Выполнено ${s.done} из ${s.total}` : 'На этот день ничего не запланировано'}</div>
           <div class="summary-sub">${allDone ? 'Отличная работа — так держать 🎉' : s.total ? summaryRest(s) : 'Можно отдохнуть'}</div>
@@ -398,6 +398,9 @@ function tapStage(h, day) {
 }
 
 const STATUS_CLASS = { ontime: 'is-done', late: 'is-done', qada: 'is-qada', missed: 'is-missed' };
+
+/** Процент в кольце сводки: «100» — три цифры, шрифт на ступень меньше, чтобы не касаться кольца. */
+const summaryPct = (pct) => `<span class="summary-pct ${pct >= 100 ? 'is-long' : ''}">${pct}<small>%</small></span>`;
 
 /** Подпись под «Выполнено N из M»: объясняет процент кольца, если часть привычек начата, но не закрыта. */
 function summaryRest(s) {
@@ -3051,7 +3054,6 @@ function toggleFav(id) {
   haptic(10);
 }
 const starBtn = (id) => `<button class="dhikr-star ${isFav(id) ? 'is-on' : ''}" data-fav="${id}" aria-label="${isFav(id) ? 'Убрать из избранного' : 'В избранное'}">${isFav(id) ? '★' : '☆'}</button>`;
-const zWord = (n) => `${n} ${plural(n, ['зикр', 'зикра', 'зикров'])}`;
 
 /** 1. Главный экран: разделы и «Сегодня». */
 async function openDhikr() {
@@ -3070,12 +3072,11 @@ async function openDhikr() {
       const tiles = DHIKR_COLLECTIONS.map((c) => {
         const items = collectionItems(c.id, list, st);
         const soon = c.soon && !items.length;
-        const sub = soon ? 'Скоро' : c.id === 'favorites' && !items.length ? 'Нет избранных' : zWord(items.length);
         const now = !soon && collectionIsNow(c, ctx.prayers, min);
-        return `<button class="dhikr-tile tint-${c.tint} ${soon ? 'is-soon' : ''}" data-col="${c.id}" ${soon ? 'aria-disabled="true"' : ''}>
-          ${now ? '<span class="dhikr-now">Сейчас</span>' : ''}
-          <span class="dhikr-tile-icon">${c.icon}</span>
-          <b>${c.title}</b><span>${sub}</span>
+        // как смарт-списки «Напоминаний»: цветной круг с глифом, число справа, название внизу
+        return `<button class="dhikr-tile dhikr-col ${soon ? 'is-soon' : ''}" style="--t:var(--${c.tint})" data-col="${c.id}" ${soon ? 'aria-disabled="true"' : ''}>
+          <span class="dhikr-col-top"><span class="dhikr-col-icon">${icon[c.icon](20)}</span>${soon ? '' : `<span class="dhikr-col-count">${items.length}</span>`}</span>
+          <b>${c.title}</b>${now ? '<span class="dhikr-col-now">Сейчас</span>' : soon ? '<span>Скоро</span>' : ''}
         </button>`;
       }).join('');
       const t = dhikrTotals(getData(), todayKey());
