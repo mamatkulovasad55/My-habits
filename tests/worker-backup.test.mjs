@@ -33,6 +33,7 @@ assert.equal(d.caption, 'Бэкап · 15.11.2026 · 3 события');
 assert.equal(d.document.name, 'data-2026-11-15.json');
 assert.deepEqual(JSON.parse(await d.document.text()), data, 'в файле — data.json целиком');
 assert.equal(JSON.parse(KV.map.get('state')).backup, '2026-11-15');
+assert.equal(JSON.parse(net.remote).backupLog?.weekly, tashkent(2026, 11, 15, 21, 0), 'время еженедельного бэкапа записано в данные');
 console.log('✓ воскресенье 21:00: один бэкап документом, подпись с датой и числом событий');
 
 // следующее воскресенье — снова
@@ -60,3 +61,40 @@ assert.equal(j.events, 3);
 assert.equal(docs().length, 3);
 assert.equal(KV.puts, putsBefore, 'ручной бэкап не тратит записи KV');
 console.log('✓ /api/backup: только владелец, без записей в KV');
+
+// автобэкап перед опасным действием: подпись по причине, текущие данные устройства сливаются с репозиторием
+const callBody = (body) => worker.fetch(new Request('https://w.dev/api/backup', { method: 'POST', headers: { 'X-Init-Data': initData({ id: 777 }) }, body: JSON.stringify(body) }), env).then(async (r) => [r.status, await r.json()]);
+const device = JSON.parse(net.remote);
+device.habits.push({ id: 'new1', name: 'Только на устройстве', createdAt: 5, updatedAt: Date.now(), schedule: { kind: 'daily' } });
+[s, j] = await callBody({ reason: 'reset', data: device });
+assert.equal(s, 200);
+const auto = docs().at(-1).body;
+assert.ok(auto.caption.startsWith('Перед сбросом прогресса · Бэкап · '), auto.caption);
+assert.ok(JSON.parse(await auto.document.text()).habits.some((h) => h.id === 'new1'), 'в бэкапе — данные устройства');
+assert.equal(JSON.parse(net.remote).backupLog.bot, j.at, 'время ручного бэкапа записано в данные');
+for (const [reason, cap] of [['wipe', 'Перед удалением'], ['import', 'Перед импортом']]) {
+  await callBody({ reason, data: device });
+  assert.ok(docs().at(-1).body.caption.startsWith(`${cap} · `));
+}
+const n = docs().length;
+[s, j] = await callBody({ reason: 'hack', data: device });
+assert.equal(s, 400);
+assert.equal(docs().length, n, 'чужая причина — без отправки');
+console.log('✓ автобэкап: подпись «Перед сбросом/удалением/импортом», данные устройства в файле, время записано, чужая причина отклонена');
+
+// выключенный еженедельный бэкап в воскресенье не приходит
+const off = JSON.parse(net.remote);
+off.settings = { ...off.settings, backup: { weekly: false } };
+net.remote = JSON.stringify(off);
+const m = docs().length;
+for (const mi of [0, 30]) {
+  setNow(tashkent(2026, 11, 29, 21, mi));
+  await runCron(worker, env);
+}
+assert.equal(docs().length, m);
+off.settings.backup.weekly = true;
+net.remote = JSON.stringify(off);
+setNow(tashkent(2026, 11, 29, 21, 31));
+await runCron(worker, env);
+assert.equal(docs().length, m + 1, 'включили обратно — пришёл');
+console.log('✓ выключенный еженедельный бэкап не отправляется');

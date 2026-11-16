@@ -40,6 +40,7 @@ export function defaultSettings() {
     // порядок восполнения (сахиб ат-тартиб); limit/countVitr — уточняются у имама
     tartib: { enabled: false, limit: 6, countOld: false, countVitr: true, asked: false },
     dhikr: { target: 33, haptics: true, last: 'subhanallah', favorites: [] }, // счётчик зикров: цель (0 — без цели), вибрация, последний зикр
+    backup: { weekly: true }, // еженедельный бэкап в бота (воскресенье 21:00)
   };
 }
 
@@ -54,6 +55,7 @@ export function emptyData() {
     notes: {},
     settings: normalizeSettings(undefined), // значения по умолчанию с метками 0
     achievements: [],
+    backupLog: {},
   };
 }
 
@@ -76,11 +78,39 @@ function normalizeSettings(raw) {
     dhikr: { ...d.dhikr, ...(s.dhikr || {}) },
     profile: { ...d.profile, ...(s.profile || {}) },
     privacy: { ...d.privacy, ...(s.privacy || {}) },
+    backup: { ...d.backup, ...(s.backup || {}) },
   }, d);
 }
 
 // Поля верхнего уровня, которые этот код понимает. Остальные (разделы из будущих версий) сохраняются как есть.
-const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'resetAt', 'habits', 'logs', 'abstain', 'notes', 'settings', 'achievements']);
+const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'resetAt', 'habits', 'logs', 'abstain', 'notes', 'settings', 'achievements', 'backupLog']);
+
+// ---------- Журнал бэкапов ----------
+// data.backupLog = { bot, weekly, export } — время последнего бэкапа каждого вида (мс). Не настройка:
+// импорт старого файла не откатывает дату назад, при слиянии по каждому виду берётся самое позднее.
+export const BACKUP_KINDS = ['bot', 'weekly', 'export'];
+
+function normalizeBackupLog(raw) {
+  const out = {};
+  for (const k of BACKUP_KINDS) if (Number(raw?.[k]) > 0) out[k] = Number(raw[k]);
+  return out;
+}
+
+export function mergeBackupLog(a = {}, b = {}) {
+  const out = {};
+  for (const k of BACKUP_KINDS) {
+    const v = Math.max(Number(a[k]) || 0, Number(b[k]) || 0);
+    if (v) out[k] = v;
+  }
+  return out;
+}
+
+/** Самый поздний бэкап: { at, kind } или null. */
+export function lastBackup(log) {
+  let best = null;
+  for (const k of BACKUP_KINDS) if (Number(log?.[k]) > (best?.at || 0)) best = { at: Number(log[k]), kind: k };
+  return best;
+}
 
 export function normalize(d) {
   const e = emptyData();
@@ -98,6 +128,7 @@ export function normalize(d) {
     notes: d.notes && typeof d.notes === 'object' ? d.notes : {},
     settings: normalizeSettings(d.settings),
     achievements: normalizeAchievements(d.achievements),
+    backupLog: normalizeBackupLog(d.backupLog),
   };
 }
 
@@ -175,6 +206,34 @@ function mergeEntities(a = [], b = []) {
   return [...map.values()].sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0));
 }
 
+// ---------- Детокс: слияние с учётом «Сбросить прогресс» ----------
+// История детокса (startedAt, attempts, cleanDays) лежит внутри записи, а запись сливается целиком по updatedAt.
+// Сброс прогресса ставит записи pAt (время) и pDay (местный день). Если победила версия, не знающая о более
+// позднем сбросе (её правили на отстающем устройстве), её история обрезается до момента сброса.
+// rAt — запись восстановлена из бэкапа после сброса: её история не обрезается.
+
+/** История детокса, обрезанная по сбросу (at, day). */
+export function clampAbstain(x, at, day) {
+  const startedAt = Math.max(Number(x.startedAt) || 0, at);
+  const attempts = (Array.isArray(x.attempts) ? x.attempts : []).filter((t) => (t.end || 0) >= at).map((t) => ({ ...t, start: Math.max(t.start || 0, at) }));
+  const cleanDays = (Array.isArray(x.cleanDays) ? x.cleanDays : []).filter((d) => d >= day);
+  return { ...x, startedAt, attempts, cleanDays, pAt: at, pDay: day };
+}
+
+function mergeAbstain(a = [], b = []) {
+  const other = new Map();
+  for (const x of [...a, ...b]) {
+    const cur = other.get(x.id);
+    if (!cur || (x.pAt || 0) > (cur.pAt || 0)) other.set(x.id, x);
+  }
+  return mergeEntities(a, b).map((w) => {
+    const latest = other.get(w.id);
+    const at = latest?.pAt || 0;
+    if (w.deleted || !at || (w.pAt || 0) >= at || (w.rAt || 0) >= at) return w;
+    return clampAbstain(w, at, latest.pDay || '');
+  });
+}
+
 // ---------- Сброс («Удалить все данные») ----------
 // data.resetAt — время сброса. Журнал сливается объединением, поэтому простое удаление вернулось бы с сервера:
 // вместо этого при слиянии отбрасываются события и заметки старше метки. Событие, восстановленное из бэкапа
@@ -203,7 +262,10 @@ function pruneEntry(e, resetAt) {
 export function prepareImport(local, imported, now = Date.now()) {
   const gone = new Set([...(local?.habits || []), ...(local?.abstain || [])].filter((x) => x.deleted).map((x) => x.id));
   const revive = (list) => (Array.isArray(list) ? list.map((x) => (x && gone.has(x.id) && !x.deleted ? { ...x, updatedAt: now } : x)) : list);
-  const out = { ...imported, habits: revive(imported.habits), abstain: revive(imported.abstain) };
+  // детокс, прогресс которого здесь сброшен позже бэкапа: история из файла побеждает (rAt — не обрезать)
+  const pAt = new Map((local?.abstain || []).filter((x) => x.pAt).map((x) => [x.id, x.pAt]));
+  const restore = (list) => (Array.isArray(list) ? list.map((x) => (x && !x.deleted && (pAt.get(x.id) || 0) > (x.pAt || 0) ? { ...x, updatedAt: now, rAt: now } : x)) : list);
+  const out = { ...imported, habits: revive(imported.habits), abstain: restore(revive(imported.abstain)) };
   const resetAt = Number(local?.resetAt) || 0;
   if (!resetAt) return out;
   const logs = {};
@@ -258,9 +320,10 @@ export function merge(a, b, { serverNow } = {}) {
     resetAt,
     habits,
     logs,
-    abstain: mergeEntities(a.abstain, b.abstain),
+    abstain: mergeAbstain(a.abstain, b.abstain),
     notes,
     achievements: mergeAchievements(a.achievements, b.achievements, resetAt),
+    backupLog: mergeBackupLog(a.backupLog, b.backupLog),
     // по полям: по каждой настройке — более свежее изменение (serverNow — только на сервере)
     settings: normalizeSettings(mergeSettings(a.settings, b.settings, { serverNow })),
   };
@@ -457,6 +520,29 @@ export function resetAll(keepOld = null, now = Date.now()) {
     d.settings.profile = { ...(d.settings.profile || {}), niyyah: '' };
     if (keepOld) d.settings.qada = { ...d.settings.qada, old: { ...d.settings.qada?.old, ...keepOld } };
     stampAll(d.settings, now); // настройки после сброса — самые новые, старые с сервера их не перебьют
+  });
+}
+
+/**
+ * «Сбросить прогресс»: история обнуляется, структура остаётся. Метка resetAt (как у «Удалить все данные»)
+ * отбрасывает при слиянии отметки, заметки и достижения старше сброса; привычки не трогаются.
+ * Детоксы: отсчёт с момента сброса, попытки и чистые дни — пусто (pAt/pDay — см. mergeAbstain).
+ * qada — { old, since, vitrSince }: долг каза, который был до сброса, записывается в остаток числом,
+ * а пропуски по трекеру считаются с since (журнал отметок стирается).
+ */
+export function resetProgress({ qada = null } = {}, now = Date.now(), day = '') {
+  update((d) => {
+    d.logs = {};
+    d.notes = {};
+    d.achievements = [];
+    d.resetAt = now;
+    for (const a of d.abstain) {
+      if (a.deleted) continue;
+      Object.assign(a, { startedAt: now, attempts: [], cleanDays: [], pAt: now, pDay: day });
+      delete a.rAt;
+      a.updatedAt = now;
+    }
+    if (qada) d.settings.qada = { ...d.settings.qada, ...qada, old: { ...d.settings.qada?.old, ...(qada.old || {}) } };
   });
 }
 
