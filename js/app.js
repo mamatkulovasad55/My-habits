@@ -1,11 +1,12 @@
 // Точка входа: экраны, обработчики, живые таймеры.
 import {
-  getData, getLocal, subscribe, update, updateLocal, replaceData, merge, prepareImport, resetAll, emptyData, touch,
+  getData, getLocal, subscribe, update, updateLocal, replaceData, merge, prepareImport, resetAll, emptyData, touch, awardAchievements,
   habitsActive, habitsAll, abstainAll, findHabit, findAbstain, getLog, setLog,
   getStageLog, setStageLog, getEvents, setNote, addEvent, addDhikrRecord, QADA_LOG, reorderHabits, mergeIntoStaged,
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
+import { ACH_GROUPS, ACH_BADGES, badgeById, groupOf, computeAchievements, earnedFromData } from './achievements.js';
 import { protectedOn, isLocked, unlock, lockNow, noteLeave, noteReturn, checkRelock, onLockChange, bioInit, bio, bioLabel, bioEnabled, setBioEnabled, bioRequestAccess, bioAuthenticate, bioOpenSettings } from './lock.js';
 import { storage, storageGet, storageSet, storageRemove, storageFailed, onStorageStatus } from './storage.js';
 import * as tg from './tg.js';
@@ -14,7 +15,7 @@ import {
   goalOf, valueOf, progressOf, isDone, isScheduled, firstDay, doneInWeek, scheduleText, goalText,
   currentStreak, bestStreak, streakText, rateOf, strengthOf, strengthTrend, forbiddenAt, qadaQueue, tartibHint, tartibCount, totalCompletions, dayStats, rangeRate,
   MILESTONES, abstainElapsed, abstainBest, milestoneInfo, isCleanDay, relapseDays,
-  habitHeatValue, overallHeatValue, achievements, hasStages, stageDone,
+  habitHeatValue, overallHeatValue, hasStages, stageDone,
 } from './logic.js';
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel, tzMismatch, offsetLabel } from './prayer.js';
@@ -1525,8 +1526,6 @@ function viewStats() {
       <div class="empty"><div class="empty-emoji">📊</div><h2>Пока нет данных</h2><p>Добавь привычки — здесь появятся серии, проценты, тепловая карта и достижения.</p></div>`;
   }
   const t = today();
-  const ach = achievements();
-  if (locked) ach.list = ach.list.filter((x) => !x.abst); // достижения воздержания выдают раздел
   const bars = Array.from({ length: 14 }, (_, i) => {
     const d = addDays(t, i - 13);
     return { label: weekdayLetter(d), value: dayStats(d).ratio, highlight: i === 13 };
@@ -1560,8 +1559,6 @@ function viewStats() {
       </button>`)
     .join('');
 
-  const unlocked = ach.list.filter((x) => x.ok).length;
-
   return `
     <header class="page-head"><div><div class="eyebrow">Обзор</div><h1>Статистика</h1></div></header>
     ${habits.length ? `
@@ -1581,8 +1578,6 @@ function viewStats() {
     ${abst.length ? `<div class="group-title">Воздержание</div><div class="card list-group">${abstRows}</div>` : ''}
     ${locked && abstAny.length ? `<a class="card pad lock-plate" href="#abstain"><span>🔒</span><span><b>Раздел защищён</b><br><span class="muted small">Открыть</span></span>${icon.chevronR(16)}</a>` : ''}
     ${dhikrStatsSection()}
-    <div class="group-title">Достижения · ${unlocked} из ${ach.list.length}</div>
-    <div class="ach-grid">${ach.list.map((x) => `<div class="ach ${x.ok ? 'is-ok' : ''}"><div class="ach-emoji">${x.emoji}</div><b>${esc(x.title)}</b><span>${esc(x.desc)}</span></div>`).join('')}</div>
   `;
 }
 
@@ -1659,6 +1654,7 @@ const PROFILE_SUBS = {
   theme: { title: 'Оформление', body: () => themeSection() },
   archive: { title: 'Архив привычек', body: () => archiveSection() },
   privacy: { title: 'Конфиденциальность', body: () => privacySection() },
+  achievements: { title: 'Достижения', body: () => achievementsSection() },
   data: { title: 'Данные', body: () => dataSection() },
 };
 
@@ -1716,6 +1712,7 @@ function viewProfile() {
     ${profileHead()}
     ${tzBanner()}
     ${niyyahCard(st)}
+    ${achievementsCard()}
 
     <div class="group-title">Личные параметры</div>
     <div class="card list-group">
@@ -2343,7 +2340,7 @@ function mountProfile() {
   q('wipe').onclick = () =>
     confirmSheet({
       title: 'Удалить все данные?',
-      message: 'Привычки, воздержания, вся история, зикры, заметки и ниййа будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
+      message: 'Привычки, воздержания, вся история, зикры, заметки, ниййа и достижения будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
       confirm: 'Удалить всё',
       destructive: true,
       onConfirm: () => {
@@ -2773,6 +2770,90 @@ onLockChange((locked) => {
   render();
 });
 
+// ============================================================
+// Достижения: карточка в Профиле, экран, выдача
+// ============================================================
+
+/** Значок виден? Группа «Воздержание» скрыта, пока раздел защищён и заблокирован. */
+const badgeVisible = (b) => !(groupOf(b)?.private && isLocked());
+const MONTH_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const fmtEarned = (k) => {
+  const d = parseKey(k);
+  return `${d.getDate()} ${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+/** Полученные значки из данных (только из каталога и видимые). */
+function earnedBadges() {
+  return getData().achievements.map((x) => ({ rec: x, badge: badgeById(x.id) })).filter((x) => x.badge && badgeVisible(x.badge));
+}
+
+function achievementsCard() {
+  const earned = earnedBadges();
+  const total = ACH_BADGES.filter(badgeVisible).length;
+  const last = [...earned].sort((a, b) => (b.rec.earnedAt > a.rec.earnedAt ? 1 : b.rec.earnedAt < a.rec.earnedAt ? -1 : (b.rec.at || 0) - (a.rec.at || 0))).slice(0, 3);
+  return `<div class="group-title">Достижения</div>
+    <button class="card pad ach-card" data-nav="achievements">
+      <div class="ach-card-main"><b>Получено ${earned.length} из ${total}</b><span class="muted small">${last.length ? 'Последние' : 'Первые появятся по мере выполнения'}</span></div>
+      <div class="ach-card-icons">${last.map((x) => `<span class="ach-mini" title="${esc(x.badge.title)}">${x.badge.icon}</span>`).join('')}</div>
+      <span class="nav-chev">${icon.chevronR(16)}</span>
+    </button>`;
+}
+
+let achMemo = null; // прогресс считается при открытии экрана и до изменения данных
+function achProgress() {
+  const d = getData();
+  if (!achMemo || achMemo.at !== d.updatedAt || achMemo.day !== todayKey()) achMemo = { at: d.updatedAt, day: todayKey(), p: computeAchievements() };
+  return achMemo.p;
+}
+
+function achievementsSection() {
+  const have = new Map(getData().achievements.map((x) => [x.id, x]));
+  const prog = achProgress();
+  return ACH_GROUPS.filter((g) => !(g.private && isLocked()))
+    .map((g) => {
+      const items = ACH_BADGES.filter((b) => b.group === g.id);
+      if (!items.length) return '';
+      return `<div class="group-title">${esc(g.title)}</div>
+        <div class="ach-grid">${items
+          .map((b) => {
+            const rec = have.get(b.badgeId);
+            const cur = Math.min(b.level, prog[b.id]?.current || 0);
+            const unit = plural(b.level, b.unitForms);
+            return `<div class="ach ${rec ? 'is-ok' : ''}">
+              <div class="ach-emoji">${b.icon}</div>
+              <b>${esc(b.title)} · ${b.level}</b>
+              <span>${b.level} ${esc(unit)} ${esc(b.hint.replace(/^\S+\s/, ''))}</span>
+              ${rec
+                ? `<span class="ach-date">✓ ${esc(fmtEarned(rec.earnedAt))}</span>`
+                : `<div class="ach-progress"><div class="progress"><div style="width:${Math.round((cur / b.level) * 100)}%"></div></div><span>${cur} / ${b.level} ${esc(unit)}</span></div>`}
+            </div>`;
+          })
+          .join('')}</div>`;
+    })
+    .join('') + '<p class="footnote">Видишь только ты. Достижения считаются по твоим отметкам и не пропадают.</p>';
+}
+
+/** Выдать заработанное. Только добавляет. Первый раз (список пуст) — один общий тост. */
+let achRunKey = '';
+function runAchievements() {
+  let fresh = [];
+  // полный пересчёт — только если данные или день изменились с прошлого раза (возврат в приложение — часто)
+  const runKey = `${getData().updatedAt}:${todayKey()}:${getData().achievements.length}`;
+  if (runKey === achRunKey) return;
+  achRunKey = runKey;
+  try {
+    const firstRun = getData().achievements.length === 0;
+    fresh = awardAchievements(earnedFromData(achProgress()));
+    achRunKey = `${getData().updatedAt}:${todayKey()}:${getData().achievements.length}`;
+    const shown = fresh.map((x) => badgeById(x.id)).filter((b) => b && badgeVisible(b));
+    if (!shown.length) return;
+    if (firstRun && shown.length > 1) toast(`🏅 Получено ${shown.length} ${plural(shown.length, ['достижение', 'достижения', 'достижений'])} — смотри в Профиле`, { ms: 4500 });
+    else shown.slice(0, 2).forEach((b, i) => setTimeout(() => toast(`🏅 Новое достижение: ${b.title} · ${b.level} ${plural(b.level, b.unitForms)}`, { ms: 4000 }), i * 4300));
+  } catch (e) {
+    console.error('achievements', e);
+  }
+}
+
 let firstSyncDone = false;
 sync.onStatus(() => {
   const st = sync.getStatus();
@@ -2783,6 +2864,7 @@ sync.onStatus(() => {
   if (st.state === 'idle' && st.last && !firstSyncDone) {
     firstSyncDone = true;
     migrateNamaz();
+    runAchievements(); // после загрузки данных с сервера — иначе новое устройство выдало бы всё «заново»
     // часовой пояс для напоминаний — только после загрузки данных, чтобы не перезаписать настройки
     try {
       // «Автоматически»: пояс по городу; выбранный вручную не трогаем
@@ -3382,6 +3464,7 @@ if (!tg.inTelegram()) {
   // вернулись в приложение (например, из чата с ботом после «Сбросить код») — сразу перепроверить статус кода
   const onBack = () => {
     checkRelock();
+    if (firstSyncDone) runAchievements();
     if (state.route === 'abstain' && isLocked()) lockStatus();
   };
   window.Telegram?.WebApp?.onEvent?.('activated', onBack);

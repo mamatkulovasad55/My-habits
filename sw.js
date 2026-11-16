@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v14';
+const VERSION = 'v15';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
@@ -14,6 +14,7 @@ const ASSETS = [
   './js/util.js',
   './js/storage.js',
   './js/lock.js',
+  './js/achievements.js',
   './js/settings-merge.js',
   './js/prayer.js',
   './js/schedule.js',

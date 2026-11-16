@@ -53,6 +53,7 @@ export function emptyData() {
     abstain: [],
     notes: {},
     settings: normalizeSettings(undefined), // значения по умолчанию с метками 0
+    achievements: [],
   };
 }
 
@@ -79,7 +80,7 @@ function normalizeSettings(raw) {
 }
 
 // Поля верхнего уровня, которые этот код понимает. Остальные (разделы из будущих версий) сохраняются как есть.
-const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'resetAt', 'habits', 'logs', 'abstain', 'notes', 'settings']);
+const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'resetAt', 'habits', 'logs', 'abstain', 'notes', 'settings', 'achievements']);
 
 export function normalize(d) {
   const e = emptyData();
@@ -96,7 +97,39 @@ export function normalize(d) {
     abstain: Array.isArray(d.abstain) ? d.abstain : [],
     notes: d.notes && typeof d.notes === 'object' ? d.notes : {},
     settings: normalizeSettings(d.settings),
+    achievements: normalizeAchievements(d.achievements),
   };
+}
+
+// ---------- Достижения ----------
+// data.achievements = [{ id, earnedAt: 'YYYY-MM-DD', at }] — earnedAt фактическая дата, at — когда запись сделана
+// (нужно для «Удалить все данные»: записи старше сброса отбрасываются). Однажды полученное не удаляется.
+
+function normalizeAchievements(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((x) => x && typeof x.id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(String(x.earnedAt)))
+    .map((x) => ({ ...x, at: Number(x.at) || 0 }));
+}
+
+/** Объединить списки: по id, самая ранняя дата получения, записи старше сброса — прочь. */
+export function mergeAchievements(a = [], b = [], resetAt = 0) {
+  const map = new Map();
+  for (const x of [...a, ...b]) {
+    if ((x.at || 0) < resetAt) continue;
+    const cur = map.get(x.id);
+    if (!cur) map.set(x.id, { ...x });
+    else map.set(x.id, { ...cur, ...x, earnedAt: x.earnedAt < cur.earnedAt ? x.earnedAt : cur.earnedAt, at: Math.max(cur.at || 0, x.at || 0) });
+  }
+  return [...map.values()].sort((x, y) => (x.earnedAt < y.earnedAt ? -1 : x.earnedAt > y.earnedAt ? 1 : x.id < y.id ? -1 : 1));
+}
+
+/** Добавить новые значки (уже полученные не трогаются). Возвращает добавленные. */
+export function awardAchievements(list, now = Date.now()) {
+  const have = new Set(data.achievements.map((x) => x.id));
+  const fresh = list.filter((x) => !have.has(x.id)).map((x) => ({ id: x.id, earnedAt: x.earnedAt, at: now }));
+  if (fresh.length) update((d) => (d.achievements = mergeAchievements(d.achievements, fresh)));
+  return fresh;
 }
 
 // ---------- Журнал отметок ----------
@@ -185,6 +218,7 @@ export function prepareImport(local, imported, now = Date.now()) {
   for (const [day, n] of Object.entries(imported.notes || {})) notes[day] = (n?.t || 0) >= resetAt ? n : { ...n, t: now };
   out.logs = logs;
   out.notes = notes;
+  out.achievements = (Array.isArray(imported.achievements) ? imported.achievements : []).map((x) => ({ ...x, at: now })); // восстановлены после сброса
   // настройки из файла — новее сброса: свежие метки всем полям
   if (imported.settings && (imported.settings.updatedAt || 0) < resetAt) out.settings = stampAll(normalizeSettings(clone(imported.settings)), now);
   return out;
@@ -226,6 +260,7 @@ export function merge(a, b, { serverNow } = {}) {
     logs,
     abstain: mergeEntities(a.abstain, b.abstain),
     notes,
+    achievements: mergeAchievements(a.achievements, b.achievements, resetAt),
     // по полям: по каждой настройке — более свежее изменение (serverNow — только на сервере)
     settings: normalizeSettings(mergeSettings(a.settings, b.settings, { serverNow })),
   };
@@ -417,6 +452,7 @@ export function resetAll(keepOld = null, now = Date.now()) {
     for (const x of [...d.habits, ...d.abstain]) if (!x.deleted) tombstone(x);
     d.logs = {};
     d.notes = {};
+    d.achievements = [];
     d.resetAt = now;
     d.settings.profile = { ...(d.settings.profile || {}), niyyah: '' };
     if (keepOld) d.settings.qada = { ...d.settings.qada, old: { ...d.settings.qada?.old, ...keepOld } };
