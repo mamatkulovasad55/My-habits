@@ -964,7 +964,8 @@ function openHabitEditor(existing) {
       <div class="sheet-body">
         <div class="hero-input" style="--c:${f.color}">
           <div class="emoji-badge">${esc(f.emoji)}</div>
-          <input class="name-input" data-e="name" placeholder="Например, пить воду" value="${esc(f.name)}" maxlength="40" autocomplete="off">
+          <label class="name-cap" for="name-habit">Название</label>
+          <input class="name-input" id="name-habit" data-e="name" placeholder="Например, пить воду" value="${esc(f.name)}" maxlength="40" autocomplete="off">
         </div>
 
         <div class="group-title">Цвет</div>
@@ -1359,7 +1360,8 @@ function openAbstainEditor(existing) {
       <div class="sheet-body">
         <div class="hero-input" style="--c:${f.color}">
           <div class="emoji-badge">${esc(f.emoji)}</div>
-          <input class="name-input" data-e="name" placeholder="Например, курение" value="${esc(f.name)}" maxlength="40" autocomplete="off">
+          <label class="name-cap" for="name-abst">Название</label>
+          <input class="name-input" id="name-abst" data-e="name" placeholder="Например, курение" value="${esc(f.name)}" maxlength="40" autocomplete="off">
         </div>
         <div class="group-title">Начало воздержания</div>
         <div class="card pad">
