@@ -14,6 +14,7 @@ export function defaultSettings() {
     tz: '',
     tzAuto: true, // часовой пояс по городу (иначе — tz, выбранный вручную)
     profile: { niyyah: '' }, // «обо мне»: ниййа (до 300 символов)
+    privacy: { enabled: false, relock: 'now' }, // защита раздела «Воздержание»: код — только на сервере
     wakeWd: '07:00',
     sleepWd: '23:00',
     wakeWe: '08:00',
@@ -73,6 +74,7 @@ function normalizeSettings(raw) {
     tartib: { ...d.tartib, ...(s.tartib || {}) },
     dhikr: { ...d.dhikr, ...(s.dhikr || {}) },
     profile: { ...d.profile, ...(s.profile || {}) },
+    privacy: { ...d.privacy, ...(s.privacy || {}) },
   }, d);
 }
 

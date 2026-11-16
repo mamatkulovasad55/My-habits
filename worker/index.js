@@ -6,6 +6,7 @@ import { replaceData, merge } from '../js/store.js';
 import { dueReminders } from '../js/schedule.js';
 import { stableStringify, dkey, addDays, pad, plural } from '../js/util.js';
 import { cityTz } from '../js/prayer.js';
+import { LOCK_KEY, NONCE_TTL, FORGOT_EVERY, validCode, makeRecord, hasCode, retryIn, checkCode, randomB64, sameString } from './lock.js';
 import { verifyInitData, webhookSecret, tg, tgDocument, escHtml, openButton } from './telegram.js';
 
 const CORS = {
@@ -145,6 +146,7 @@ async function api(req, env, path) {
       return json({ error: e.message }, 502);
     }
   }
+  if (path.startsWith('/api/lock/')) return lockApi(env, path, body, owner);
   if (path === '/api/backup') {
     try {
       const remote = await getRemoteRaw(env);
@@ -159,11 +161,107 @@ async function api(req, env, path) {
   return json({ error: 'Not found' }, 404);
 }
 
+// ---------- Код раздела «Воздержание» ----------
+// Запись в KV `lock`: { salt, hash, iter, fails, until, nonce, nonceExp, forgotAt }. Код приходит только в теле запроса
+// и никуда не пишется в открытом виде. Лимит попыток — здесь, на сервере: перезапуск мини-аппа его не сбрасывает.
+
+async function loadLock(env) {
+  const rec = await kvGet(env, LOCK_KEY, 'json');
+  if (rec === undefined) throw new Error('Хранилище временно недоступно, попробуй позже');
+  return rec && typeof rec === 'object' ? rec : {};
+}
+
+async function saveLock(env, rec) {
+  if (!(await kvPut(env, LOCK_KEY, JSON.stringify(rec)))) throw new Error('Не удалось сохранить, попробуй ещё раз');
+  pendingWrites++; // учёт в счётчике записей KV
+}
+
+const lockState = (rec, now = Date.now()) => ({ hasCode: hasCode(rec), retryIn: hasCode(rec) ? retryIn(rec, now) : 0 });
+
+async function lockApi(env, path, body, owner) {
+  try {
+    const now = Date.now();
+    const rec = await loadLock(env);
+    if (path === '/api/lock/status') return json(lockState(rec, now));
+
+    // проверка текущего кода с лимитом попыток (verify и смена кода)
+    const check = async (code) => {
+      const wait = retryIn(rec, now);
+      if (wait) return { res: json({ ok: false, ...lockState(rec, now), error: 'Подожди и попробуй снова' }, 429) };
+      const r = await checkCode(rec, code, env.BOT_TOKEN, now);
+      await saveLock(env, { ...r.rec, nonce: r.ok ? undefined : rec.nonce, nonceExp: r.ok ? undefined : rec.nonceExp });
+      return r.ok ? { ok: true } : { res: json({ ok: false, ...lockState(r.rec, now), error: 'Неверный код' }, 403) };
+    };
+
+    if (path === '/api/lock/verify') {
+      if (!hasCode(rec)) return json({ ok: false, hasCode: false, retryIn: 0, error: 'Код не задан' }, 409);
+      const r = await check(body.code);
+      return r.ok ? json({ ok: true, hasCode: true, retryIn: 0 }) : r.res;
+    }
+    if (path === '/api/lock/set') {
+      if (!validCode(body.code)) return json({ error: 'Код — 4 цифры' }, 400);
+      if (hasCode(rec)) {
+        const r = await check(body.current);
+        if (!r.ok) return r.res;
+      }
+      await saveLock(env, { ...(await makeRecord(body.code, env.BOT_TOKEN)), forgotAt: rec.forgotAt || 0 });
+      return json({ ok: true, hasCode: true, retryIn: 0 });
+    }
+    if (path === '/api/lock/clear') {
+      // выключение защиты или смена кода по биометрии: клиент уже подтвердил человека (защита на уровне интерфейса)
+      if (retryIn(rec, now)) return json({ ok: false, ...lockState(rec, now), error: 'Подожди и попробуй снова' }, 429);
+      await saveLock(env, { forgotAt: rec.forgotAt || 0 });
+      return json({ ok: true, hasCode: false, retryIn: 0 });
+    }
+    if (path === '/api/lock/forgot') {
+      if (!hasCode(rec)) return json({ ok: true, hasCode: false });
+      if (now - (Number(rec.forgotAt) || 0) < FORGOT_EVERY) return json({ ok: true, sent: false, error: 'Сообщение уже отправлено — проверь чат с ботом' });
+      const nonce = randomB64(12).replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
+      const sent = await sendTg(env, 'sendMessage', {
+        chat_id: Number(owner),
+        text: 'Сбросить код защищённого раздела трекера? Данные останутся на месте, при следующем входе нужно будет задать новый код.',
+        reply_markup: { inline_keyboard: [[{ text: 'Сбросить код', callback_data: `lockreset:${nonce}` }]] },
+      });
+      if (!sent) return json({ error: 'Бот не смог отправить сообщение, попробуй позже' }, 502);
+      await saveLock(env, { ...rec, nonce, nonceExp: now + NONCE_TTL, forgotAt: now });
+      return json({ ok: true, sent: true });
+    }
+    return json({ error: 'Not found' }, 404);
+  } catch (e) {
+    return json({ error: e.message || 'Ошибка сервера' }, 503);
+  }
+}
+
+/** Нажатие «Сбросить код» в сообщении бота. */
+async function lockResetCallback(env, cq) {
+  const answer = (text) => sendTg(env, 'answerCallbackQuery', { callback_query_id: cq.id, text });
+  const owner = await getOwner(env);
+  const nonce = String(cq.data || '').slice('lockreset:'.length);
+  const rec = await kvGet(env, LOCK_KEY, 'json');
+  const valid = owner && String(cq.from?.id) === owner && rec && rec.nonce && sameString(nonce, rec.nonce) && Date.now() < (Number(rec.nonceExp) || 0);
+  if (!valid) return answer('Ссылка устарела');
+  if (!(await kvPut(env, LOCK_KEY, JSON.stringify({ forgotAt: rec.forgotAt || 0 })))) return answer('Не получилось, попробуй ещё раз');
+  pendingWrites++;
+  await answer('Код сброшен');
+  if (cq.message) {
+    await sendTg(env, 'editMessageText', {
+      chat_id: cq.message.chat.id,
+      message_id: cq.message.message_id,
+      text: 'Код сброшен. Открой трекер и задай новый — данные на месте.',
+      reply_markup: openButton(env.APP_URL),
+    });
+  }
+}
+
 // ---------- Бот ----------
 
 async function webhook(req, env) {
   if (!safeEqual(req.headers.get('X-Telegram-Bot-Api-Secret-Token'), await webhookSecret(env.BOT_TOKEN))) return new Response('forbidden', { status: 403 });
   const update = await req.json().catch(() => ({}));
+  if (update.callback_query && /^lockreset:/.test(update.callback_query.data || '')) {
+    await lockResetCallback(env, update.callback_query);
+    return new Response('ok');
+  }
   const msg = update.message;
   if (msg?.chat?.type === 'private' && /^\/start\b/.test(msg.text || '')) {
     await tg(env.BOT_TOKEN, 'sendMessage', {
@@ -363,7 +461,8 @@ async function tickUser(env, user) {
   // вчерашний день: хвост через полночь и этапы, чьё время длится до утра (утренний повтор про Ишу)
   if (min < 720) due.push(...dueReminders(addDays(date, -1), 1440 + min - 3, 1440 + min));
   // еженедельный бэкап: воскресенье с 21:00 до конца дня (догоняет, если cron пропустил минуту)
-  const backupDay = date.getDay() === BACKUP_WEEKDAY && min >= BACKUP_AT ? dkey(date) : '';
+  // при включённой защите «Воздержания» файл с данными в чат автоматически не отправляется (его нельзя закрыть кодом)
+  const backupDay = date.getDay() === BACKUP_WEEKDAY && min >= BACKUP_AT && !remote.data.settings?.privacy?.enabled ? dkey(date) : '';
   if (!due.length && !backupDay) return;
   const state = await loadState(env, dkey(date));
   const fresh = due.filter((r) => !state.has(r.key));
