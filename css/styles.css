@@ -36,8 +36,8 @@
   --bar-bg: rgba(255, 255, 255, 0.78);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 18px rgba(0, 0, 0, 0.04);
 
-  --radius: 18px;
-  --radius-sm: 12px;
+  --radius: var(--ios-radius-xxl);
+  --radius-sm: var(--ios-radius-m);
   --gutter: var(--ios-space-l);
   --tabbar-h: 58px;
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -369,7 +369,7 @@ a { color: inherit; text-decoration: none; }
   gap: 6px;
   min-height: 46px;
   padding: 0 20px;
-  border-radius: 14px;
+  border-radius: var(--ios-radius-full);
   font-size: var(--ios-headline);
   font-weight: 600;
   letter-spacing: var(--ios-headline-ls);
@@ -413,7 +413,7 @@ a { color: inherit; text-decoration: none; }
   position: relative;
   padding: 18px 18px 14px;
   background: var(--card);
-  border-radius: 22px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
   cursor: pointer;
@@ -633,7 +633,7 @@ a { color: inherit; text-decoration: none; }
   max-height: calc(100dvh - var(--safe-t) - 28px);
   display: flex; flex-direction: column;
   background: var(--sheet-bg);
-  border-radius: 14px 14px 0 0;
+  border-radius: var(--ios-radius-sheet) var(--ios-radius-sheet) 0 0;
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18);
   transform: translateY(100%);
   transition: transform 0.42s var(--ease);
@@ -670,7 +670,7 @@ a { color: inherit; text-decoration: none; }
 
 @media (min-width: 700px) {
   .sheet-backdrop { align-items: center; }
-  .sheet { border-radius: 18px; max-height: 86vh; transform: translateY(24px) scale(0.98); opacity: 0; transition: transform 0.35s var(--ease), opacity 0.25s; }
+  .sheet { border-radius: var(--ios-radius-sheet); max-height: 86vh; transform: translateY(24px) scale(0.98); opacity: 0; transition: transform 0.35s var(--ease), opacity 0.25s; }
   .sheet-backdrop.is-open .sheet { opacity: 1; }
   .sheet.is-closing { transform: translateY(24px) scale(0.98) !important; opacity: 0; }
   .sheet-grabber { visibility: hidden; }
@@ -752,14 +752,14 @@ a { color: inherit; text-decoration: none; }
 .segmented {
   display: flex;
   padding: 2px;
-  border-radius: 9px;
+  border-radius: var(--ios-radius-full);
   background: var(--fill);
 }
 .segmented button {
   flex: 1;
   min-height: 32px;
   padding: 0 6px;
-  border-radius: 7px;
+  border-radius: var(--ios-radius-full);
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -908,7 +908,7 @@ a { color: inherit; text-decoration: none; }
   gap: 14px;
   max-width: calc(100vw - 32px);
   padding: 12px 18px;
-  border-radius: 14px;
+  border-radius: var(--ios-radius-full);
   background: rgba(30, 30, 32, 0.92);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
@@ -1059,8 +1059,9 @@ select.field.compact { padding-right: 30px; }
   -webkit-appearance: none;
   appearance: none;
   flex: none;
-  width: 51px; height: 31px;
-  border-radius: 16px;
+  width: 64px;
+  height: 28px;
+  border-radius: var(--ios-radius-full);
   background: var(--fill-2);
   position: relative;
   cursor: pointer;
@@ -1070,15 +1071,17 @@ select.field.compact { padding-right: 30px; }
 .switch::after {
   content: "";
   position: absolute;
-  top: 2px; left: 2px;
-  width: 27px; height: 27px;
-  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  width: 39px;
+  height: 24px;
+  border-radius: var(--ios-radius-full);
   background: #fff;
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
   transition: transform 0.25s var(--ease);
 }
 .switch:checked { background: var(--green); }
-.switch:checked::after { transform: translateX(20px); }
+.switch:checked::after { transform: translateX(21px); }
 .settings-rows { margin-top: 14px; border-top: 0.5px solid var(--sep); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 
 /* намаз */
@@ -1162,7 +1165,7 @@ body.is-gate .tabbar { display: none; }
 .hijri-today { font-size: var(--ios-body); letter-spacing: var(--ios-body-ls); }
 .chips.hijri-days { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 .chips.hijri-days .chip { min-width: 0; padding: 8px 0; text-align: center; }
-.segmented[data-seg="sched"] { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.segmented[data-seg="sched"] { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; border-radius: var(--ios-radius-bubble); }
 
 /* Каза: тартиб, запретное время */
 .queue-n { width: 24px; height: 24px; border-radius: 50%; background: var(--fill); display: inline-flex; align-items: center; justify-content: center; font-size: var(--ios-footnote); font-weight: 600; flex: none; letter-spacing: var(--ios-footnote-ls); }
@@ -1206,9 +1209,17 @@ body.is-gate .tabbar { display: none; }
 .dhikr-head .icon-btn.sm { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
 .dhikr-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .dhikr-tile {
-  position: relative; min-height: 132px; padding: 16px; border-radius: 22px; text-align: left;
-  display: flex; flex-direction: column; justify-content: flex-end; gap: 2px;
-  background: var(--sheet-card); color: var(--label);
+  position: relative;
+  min-height: 132px;
+  padding: 16px;
+  border-radius: var(--radius);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  background: var(--sheet-card);
+  color: var(--label);
   transition: transform 0.12s var(--ease);
 }
 .dhikr-tile:active { transform: scale(0.97); }
@@ -1227,7 +1238,7 @@ body.is-gate .tabbar { display: none; }
 .dhikr-now { position: absolute; top: 12px; right: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.75); color: #fff; font-size: 13px; font-weight: 600; }
 .dhikr-home .group-title { margin-top: 22px; }
 .dhikr-list { display: flex; flex-direction: column; gap: 10px; }
-.dhikr-item { padding: 14px 16px; border-radius: 18px; background: var(--sheet-card); cursor: pointer; transition: transform 0.12s var(--ease); }
+.dhikr-item { padding: 14px 16px; border-radius: var(--radius); background: var(--sheet-card); cursor: pointer; transition: transform 0.12s var(--ease); }
 .dhikr-item:active { transform: scale(0.98); }
 .dhikr-item-top { display: flex; align-items: center; gap: 8px; }
 .dhikr-item-top b { font-size: 17px; font-weight: 600; }
@@ -1329,7 +1340,7 @@ body.is-gate .tabbar { display: none; }
   flex-direction: column;
   gap: 2px;
   padding: 10px 40px 6px 14px;
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--orange) 14%, var(--card));
   border: 1px solid color-mix(in srgb, var(--orange) 55%, transparent);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
