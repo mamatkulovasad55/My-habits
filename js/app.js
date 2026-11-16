@@ -161,7 +161,7 @@ function viewToday() {
         ${ring(s.ratio ?? 0, { size: 92, stroke: 10, key: 'summary', color: 'var(--green)', inner: `<span class="summary-pct">${s.total ? Math.round((s.ratio || 0) * 100) : 0}<small>%</small></span>` })}
         <div class="summary-text">
           <div class="summary-title">${allDone ? 'Все цели выполнены' : s.total ? `Выполнено ${s.done} из ${s.total}` : 'На этот день ничего не запланировано'}</div>
-          <div class="summary-sub">${allDone ? 'Отличная работа — так держать 🎉' : s.total ? `Осталось ${s.total - s.done} — ты справишься` : 'Можно отдохнуть'}</div>
+          <div class="summary-sub">${allDone ? 'Отличная работа — так держать 🎉' : s.total ? summaryRest(s) : 'Можно отдохнуть'}</div>
         </div>
       </section>`
     : '';
@@ -398,6 +398,13 @@ function tapStage(h, day) {
 }
 
 const STATUS_CLASS = { ontime: 'is-done', late: 'is-done', qada: 'is-qada', missed: 'is-missed' };
+
+/** Подпись под «Выполнено N из M»: объясняет процент кольца, если часть привычек начата, но не закрыта. */
+function summaryRest(s) {
+  const rest = s.total - s.done - (s.started || 0);
+  if (!s.started) return `Осталось ${s.total - s.done} — ты справишься`;
+  return rest ? `В процессе: ${s.started} · не начато: ${rest}` : `В процессе: ${s.started} — почти готово`;
+}
 
 /** Плашка «Сила N» для привычек-ибадата (вместо серии). */
 function strengthChip(h) {

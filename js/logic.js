@@ -328,10 +328,11 @@ export function totalCompletions(h) {
   return Object.keys(logs).filter((day) => isDone(h, day)).length;
 }
 
-/** Итог дня по всем активным привычкам: {done, total, ratio} */
+/** Итог дня по всем активным привычкам: {done, started, total, ratio}; started — начаты, но не выполнены */
 export function dayStats(date, habits = habitsAll().filter((h) => !h.archived)) {
   const key = dkey(date);
   let done = 0;
+  let started = 0;
   let total = 0;
   let sum = 0;
   for (const h of habits) {
@@ -341,8 +342,9 @@ export function dayStats(date, habits = habitsAll().filter((h) => !h.archived)) 
     const p = progressOf(h, key);
     sum += p;
     if (p >= 1) done++;
+    else if (p > 0) started++;
   }
-  return { done, total, ratio: total ? sum / total : null };
+  return { done, started, total, ratio: total ? sum / total : null };
 }
 
 export function rangeRate(days) {
