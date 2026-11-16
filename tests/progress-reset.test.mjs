@@ -79,6 +79,14 @@ console.log('✓ слияние со старой копией: история �
 // 3. Отстающее устройство отметило чистый день и срыв, не зная о сбросе — старые попытки не возвращаются
 const stale = clone(server);
 stale.abstain[0] = { ...stale.abstain[0], cleanDays: [...stale.abstain[0].cleanDays, '2026-11-16'], updatedAt: LATER };
+// и срыв: в его попытках — старая история плюс попытка, начатая до сброса и законченная после
+const staleRelapse = clone(stale);
+staleRelapse.abstain[0] = { ...staleRelapse.abstain[0], attempts: [...staleRelapse.abstain[0].attempts, { start: staleRelapse.abstain[0].startedAt, end: LATER, note: '' }], startedAt: LATER, cleanDays: [], updatedAt: LATER + 1 };
+for (const m of [merge(reset, staleRelapse), merge(staleRelapse, reset)]) {
+  const x = m.abstain[0];
+  assert.deepEqual(x.attempts, [{ start: RESET, end: LATER, note: '' }], 'срыв после сброса — одна попытка, начатая с момента сброса');
+  assert.equal(x.startedAt, LATER);
+}
 stale.logs.gym['2026-11-16'] = { v: 1, t: LATER, ev: [{ id: 'g2', ts: LATER, d: 1 }] };
 for (const m of [merge(reset, stale), merge(stale, reset), merge(merge(reset, stale), clone(server))]) {
   const x = m.abstain[0];

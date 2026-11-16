@@ -150,7 +150,7 @@ async function api(req, env, path) {
   if (path === '/api/backup') {
     // reason — автобэкап перед опасным действием (подпись в боте); data — текущие данные устройства:
     // сначала сливаются с репозиторием, в бэкап идёт результат (даже если обычная синхронизация не прошла)
-    const reason = body.reason ? BACKUP_REASONS[body.reason] : '';
+    const reason = !body.reason ? '' : Object.hasOwn(BACKUP_REASONS, body.reason) ? BACKUP_REASONS[body.reason] : undefined;
     if (reason === undefined) return json({ error: 'Неизвестная причина бэкапа' }, 400);
     try {
       let data;
@@ -466,7 +466,6 @@ async function tickUser(env, user) {
   if (needBackup && (await sendBackup(env, owner, remote.data, date)).ok) {
     state.backup = backupSentDay = backupDay;
     changed = true;
-    await noteBackup(env, 'weekly', Date.now());
   }
   for (const r of fresh) {
     // Telegram передаёт параметры запуска в #хэше, поэтому экран указываем через ?query
@@ -483,6 +482,8 @@ async function tickUser(env, user) {
     }
   }
   if (changed) await saveState(env, state, owner);
+  // время бэкапа — в данные (после записи состояния: зависший GitHub не должен привести к повторной отправке)
+  if (state.backup === backupDay && needBackup) await noteBackup(env, 'weekly', Date.now());
 }
 
 async function runTick(env) {

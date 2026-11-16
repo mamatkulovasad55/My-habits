@@ -254,6 +254,33 @@ for (const scheme of ['light', 'dark']) {
   ok((await text(lock.p, '.lock-screen h2')) === 'Раздел защищён', '«Раздел защищён»');
   ok((await lock.p.locator('.pin-key[data-pin]').count()) === 11, 'клавиатура: 10 цифр и «Стереть»');
   await shot(lock.p, `lock-${scheme}`);
+  // «Данные» при защите: переключатель неактивен, опасные действия и импорт — только по коду
+  await go(lock.p, 'profile/data');
+  const wk = lock.p.locator('#view [data-set-bool="backup.weekly"]');
+  ok((await wk.isDisabled()) && (await lock.p.locator('#view .switch-row .muted').first().innerText()).includes('пока включена защита'), 'защита: еженедельный бэкап неактивен, с подписью');
+  await shot(lock.p, `data-locked-${scheme}`);
+  const before = await lock.p.evaluate(() => localStorage.getItem('myhabits:data:v1'));
+  const tryCode = async () => {
+    await lock.p.waitForSelector('.sheet .lock-sheet');
+    for (const n of ['1', '2', '3', '4']) await lock.p.click(`.sheet .pin-key[data-pin="${n}"]`);
+    await lock.p.waitForTimeout(600);
+    ok((await text(lock.p, '.sheet .lock-msg')) === 'Неверный код', 'неверный код — отказ');
+    await lock.p.click('.sheet [data-a=cancel]');
+    await lock.p.waitForTimeout(400);
+  };
+  for (const s of ['reset', 'wipe']) {
+    await lock.p.click(`#view [data-s=${s}]`);
+    await lock.p.waitForSelector('.sheet .confirm');
+    ok((await lock.p.locator('.sheet [data-word]').count()) === 0, `${s}: при защите — без ввода слова`);
+    await lock.p.click('.sheet [data-c=ok]');
+    await tryCode();
+  }
+  await lock.p.locator('#view [data-s=import]').setInputFiles({ name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(seed())) });
+  await lock.p.waitForSelector('.import-preview');
+  await lock.p.waitForTimeout(400);
+  await lock.p.click('.sheet [data-c=ok]');
+  await tryCode();
+  ok(!lock.backups.length && (await lock.p.evaluate(() => localStorage.getItem('myhabits:data:v1'))) === before, 'без кода: ни бэкапа, ни изменений');
   ok(!lock.errors.length, `без ошибок JS${lock.errors.length ? `:\n      ${lock.errors.join('\n      ')}` : ''}`);
   await lock.ctx.close();
 }

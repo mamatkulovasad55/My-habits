@@ -1891,7 +1891,7 @@ function dataSection() {
     <div class="group-title">Резервная копия</div>
     <div class="card list-group">
       <button class="row" data-s="backup">${icon.cloud(20)}<span>Прислать бэкап в бота</span></button>
-      <label class="row static switch-row ${locked ? 'is-off' : ''}">${icon.calendar(20)}<span class="row-main"><span>Еженедельный бэкап в бота</span><span class="muted">${locked ? 'Не отправляется, пока включена защита «Детокса»' : 'по воскресеньям в 21:00'}</span></span><input type="checkbox" class="switch" data-set-bool="backup.weekly" ${weekly && !locked ? 'checked' : ''} ${locked ? 'disabled' : ''}></label>
+      <label class="row static switch-row ${locked ? 'is-off' : ''}">${icon.calendar(20)}<span class="row-main"><span>Еженедельный бэкап</span><span class="muted">${locked ? 'Не отправляется, пока включена защита «Детокса»' : 'в бота по воскресеньям в 21:00'}</span></span><input type="checkbox" class="switch" data-set-bool="backup.weekly" ${weekly && !locked ? 'checked' : ''} ${locked ? 'disabled' : ''}></label>
       <button class="row" data-s="export">${icon.archive(20)}<span>Экспорт в JSON</span></button>
       <label class="row">${icon.undo(20)}<span>Импорт из JSON</span><input type="file" accept="application/json,.json" data-s="import" hidden></label>
     </div>
@@ -2371,7 +2371,7 @@ const DANGER = {
     word: 'СБРОС',
     confirm: 'Сбросить прогресс',
     gone: 'все отметки и зикры, заметки, достижения, история восполнения каза, попытки и чистые дни детокса',
-    kept: 'привычки с этапами, расписаниями и напоминаниями, детоксы (отсчёт — с этой минуты), архив, все настройки, ниййа, долг каза — числом',
+    kept: 'привычки с этапами, расписаниями и напоминаниями, детоксы (отсчёт — с этой минуты), архив, настройки, ниййа. Долг каза переносится в остаток числом, новые пропуски считаются с завтрашнего дня',
     run: () => {
       resetProgressNow();
       updateLocal((l) => (l.timers = {}));
@@ -2429,7 +2429,9 @@ function guarded(reason, run) {
       if (navigator.onLine === false) throw new Error('Нет сети');
       toast('Отправляю бэкап в бота…', { ms: 8000 });
       const r = await sync.api('/api/backup', { reason, data: getData() });
-      noteBackup('bot', r?.at);
+      // старый сервер игнорирует данные и причину (нет at) — такой бэкап не считаем
+      if (!r?.ok || !r.at) throw new Error('Сервер ещё не обновлён — бэкап с подписью не отправлен');
+      noteBackup('bot', r.at);
     },
     fallback: (err) => new Promise((resolve) => {
       document.querySelector('.toast')?.classList.remove('is-shown'); // «Отправляю бэкап…» не закрывает кнопки
