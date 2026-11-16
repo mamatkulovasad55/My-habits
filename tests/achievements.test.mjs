@@ -26,7 +26,11 @@ for (const k of [key(10, 16), key(10, 23), key(10, 30), key(11, 6)]) {
   const evs = (data.logs.namaz[k]?.ev || []).filter((x) => x.s !== 'p-dhuhr');
   data.logs.namaz[k] = entry([...evs, ev(k, 'p-dhuhr', { k: 'juma' })]);
 }
-data.logs.namaz[key(11, 13)] = entry([ev(key(11, 13), 'p-dhuhr', { k: 'dhuhr' })]);
+// после каза 11-го — снова вовремя 12-го и 13-го (13-го в пятницу Зухр вместо Джума): серия начинается заново
+for (const d of [12, 13]) {
+  const k = key(11, d);
+  data.logs.namaz[k] = entry(FARD.map((p) => ev(k, `p-${p}`, d === 13 && p === 'dhuhr' ? { k: 'dhuhr' } : {})));
+}
 // Каза: 12 восполнений старого долга с 1 ноября, одно отменено (−1) → 10-е — 11 ноября
 data.logs.__qada = {};
 for (let d = 1; d <= 12; d++) {
@@ -46,7 +50,14 @@ replaceData(data);
 const p = computeAchievements();
 const earned = Object.fromEntries(earnedFromData(p).map((x) => [x.id, x.earnedAt]));
 assert.equal(earned['fard-ontime-7'], '2026-11-07', '7-й день подряд (день с «позже» засчитан)');
-assert.equal(p['fard-ontime'].current, 0, 'каза 11-го рвёт серию');
+assert.equal(p['fard-ontime'].current, 0, '14–15-го без отметок — серия прервана');
+{
+  // 1–10 и 12–13 вовремя, 11-го Зухр каза: без обрыва было бы 13 дней подряд
+  const { METRICS } = await import('../js/achievements.js');
+  const r = METRICS.fardOntimeRun([10, 12]);
+  assert.equal(r.reached[10], '2026-11-10');
+  assert.equal(r.reached[12], undefined, 'каза 11-го рвёт серию');
+}
 assert.equal(earned['fard-ontime-30'], undefined);
 assert.equal(earned['juma-4'], '2026-11-06', '4-я пятница подряд');
 assert.equal(p.juma.current, 0, '13-го — Зухр вместо Джума');

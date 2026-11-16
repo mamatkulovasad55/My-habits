@@ -2340,7 +2340,7 @@ function mountProfile() {
   q('wipe').onclick = () =>
     confirmSheet({
       title: 'Удалить все данные?',
-      message: 'Привычки, воздержания, вся история, зикры, заметки и ниййа будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
+      message: 'Привычки, воздержания, вся история, зикры, заметки, ниййа и достижения будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
       confirm: 'Удалить всё',
       destructive: true,
       onConfirm: () => {
@@ -2834,11 +2834,17 @@ function achievementsSection() {
 }
 
 /** Выдать заработанное. Только добавляет. Первый раз (список пуст) — один общий тост. */
+let achRunKey = '';
 function runAchievements() {
   let fresh = [];
+  // полный пересчёт — только если данные или день изменились с прошлого раза (возврат в приложение — часто)
+  const runKey = `${getData().updatedAt}:${todayKey()}:${getData().achievements.length}`;
+  if (runKey === achRunKey) return;
+  achRunKey = runKey;
   try {
     const firstRun = getData().achievements.length === 0;
-    fresh = awardAchievements(earnedFromData(computeAchievements()));
+    fresh = awardAchievements(earnedFromData(achProgress()));
+    achRunKey = `${getData().updatedAt}:${todayKey()}:${getData().achievements.length}`;
     const shown = fresh.map((x) => badgeById(x.id)).filter((b) => b && badgeVisible(b));
     if (!shown.length) return;
     if (firstRun && shown.length > 1) toast(`🏅 Получено ${shown.length} ${plural(shown.length, ['достижение', 'достижения', 'достижений'])} — смотри в Профиле`, { ms: 4500 });
