@@ -1564,7 +1564,7 @@ function viewStats() {
   const abstRows = abst
     .map((a) => `<button class="row" data-action="open-abstain" data-id="${a.id}">
         <span class="emoji-chip" style="--c:${a.color}">${esc(a.emoji)}</span>
-        <div class="row-main"><b>${esc(a.name)}</b><span class="muted">рекорд ${esc(fmtDuration(abstainBest(a)))} · ${(a.cleanDays || []).length} ${plural((a.cleanDays || []).length, ['чистый день', 'чистых дня', 'чистых дней'])}</span></div>
+        <div class="row-main"><b>${esc(a.name)}</b><span class="muted">рекорд ${esc(fmtDuration(abstainBest(a)))} · ${(a.cleanDays || []).length}&nbsp;${plural((a.cleanDays || []).length, ['чистый&nbsp;день', 'чистых&nbsp;дня', 'чистых&nbsp;дней'])}</span></div>
         <span class="row-val" data-live-abs-short="${a.id}">${esc(fmtDuration(abstainElapsed(a)))}</span>
       </button>`)
     .join('');
