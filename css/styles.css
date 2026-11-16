@@ -288,8 +288,12 @@ a { color: inherit; text-decoration: none; }
   line-height: var(--ios-subheadline-lh);
   letter-spacing: var(--ios-subheadline-ls);
 }
-.hsub .dot { margin-left: 6px; opacity: 0.6; }
+/* разделитель «·» стоит перед каждым фрагментом; у первого фрагмента строки он уходит
+   в отрицательный отступ и обрезается — при переносе точка не висит ни в конце, ни в начале */
+.hsub { overflow: hidden; }
+.hsub-in { display: flex; flex-wrap: wrap; align-items: baseline; margin-left: -18px; }
 .hsub .seg { white-space: nowrap; }
+.hsub .seg::before { content: '·'; display: inline-block; width: 18px; text-align: center; opacity: 0.6; }
 .hsub .streak { vertical-align: top; }
 .streak { display: inline-flex; align-items: center; gap: 3px; color: var(--orange); font-weight: 600; }
 .strength { display: inline-flex; align-items: center; gap: 5px; color: var(--c); font-weight: 600; vertical-align: top; }
