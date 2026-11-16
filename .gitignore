@@ -1,2 +1,4 @@
 # gstack и навыки, которые его setup раскладывает рядом
 .claude/skills/
+node_modules/
+tests/e2e/out/
