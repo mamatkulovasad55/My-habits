@@ -1238,12 +1238,15 @@ body.is-gate .tabbar { display: none; }
 .dhikr-tile > span:last-child { font-size: var(--ios-subheadline); color: var(--label-2); letter-spacing: var(--ios-subheadline-ls); }
 .dhikr-tile-icon { position: absolute; top: 14px; left: 16px; font-size: 30px; line-height: 1; }
 .dhikr-tile > .ring { position: absolute; top: 14px; left: 16px; }
-.dhikr-tile.tint-green { background: linear-gradient(160deg, var(--green), #248A3D); color: #fff; }
-.dhikr-tile.tint-orange { background: linear-gradient(160deg, #FFB340, #FF9500); color: #fff; }
-.dhikr-tile.tint-morning { background: linear-gradient(160deg, #A78BFA, #F0A5B4); color: #fff; }
-.dhikr-tile.tint-evening { background: linear-gradient(160deg, #F2A65A, #E5484D); color: #fff; }
-.dhikr-tile[class*="tint-"] > span:last-child { color: rgba(255, 255, 255, 0.85); }
-.dhikr-tile.is-soon { opacity: 0.55; }
+/* разделы зикров — спокойные плитки как смарт-списки iOS: цвет только в круге с глифом */
+.dhikr-tile.dhikr-col { min-height: 108px; justify-content: space-between; gap: 10px; }
+.dhikr-col-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.dhikr-col-icon { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--t); color: #fff; }
+.dhikr-col-count { font-size: var(--ios-title-1); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: var(--ios-title-1-ls); }
+.dhikr-col b { margin-top: auto; }
+.dhikr-col-now { color: var(--t); font-weight: 600; }
+.dhikr-tile.is-soon b, .dhikr-tile.is-soon > span:last-child { color: var(--label-2); }
+.dhikr-tile.is-soon .dhikr-col-icon { opacity: 0.45; }
 .dhikr-tile.is-static:active { transform: none; }
 .dhikr-total { position: absolute; top: 12px; left: 16px; font-size: 30px; font-weight: 300; font-variant-numeric: tabular-nums; }
 .dhikr-now { position: absolute; top: 12px; right: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.75); color: #fff; font-size: var(--ios-footnote); font-weight: 600; letter-spacing: var(--ios-footnote-ls); }

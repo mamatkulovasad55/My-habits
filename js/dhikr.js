@@ -153,10 +153,10 @@ export function dhikrAllTime(data) {
  * того же формата; count — сколько раз читать (вместо общей цели). window — когда показывать метку «Сейчас».
  */
 export const DHIKR_COLLECTIONS = [
-  { id: 'all', title: 'Все зикры', icon: '📿', tint: 'green' },
-  { id: 'favorites', title: 'Избранное', icon: '★', tint: 'orange' },
-  { id: 'morning', title: 'Утренние азкары', icon: '☀︎', tint: 'morning', soon: true, window: ['fajr', 'dhuhr'] },
-  { id: 'evening', title: 'Вечерние азкары', icon: '☾', tint: 'evening', soon: true, window: ['asr', 'isha'] },
+  { id: 'all', title: 'Все зикры', icon: 'beads', tint: 'green' },
+  { id: 'favorites', title: 'Избранное', icon: 'star', tint: 'orange' },
+  { id: 'morning', title: 'Утренние азкары', icon: 'sun', tint: 'yellow', soon: true, window: ['fajr', 'dhuhr'] },
+  { id: 'evening', title: 'Вечерние азкары', icon: 'moon', tint: 'indigo', soon: true, window: ['asr', 'isha'] },
 ];
 
 /** Элементы раздела. extra — тексты будущих разделов: { morning: [...], evening: [...] }. */

@@ -3054,7 +3054,6 @@ function toggleFav(id) {
   haptic(10);
 }
 const starBtn = (id) => `<button class="dhikr-star ${isFav(id) ? 'is-on' : ''}" data-fav="${id}" aria-label="${isFav(id) ? 'Убрать из избранного' : 'В избранное'}">${isFav(id) ? '★' : '☆'}</button>`;
-const zWord = (n) => `${n} ${plural(n, ['зикр', 'зикра', 'зикров'])}`;
 
 /** 1. Главный экран: разделы и «Сегодня». */
 async function openDhikr() {
@@ -3073,12 +3072,11 @@ async function openDhikr() {
       const tiles = DHIKR_COLLECTIONS.map((c) => {
         const items = collectionItems(c.id, list, st);
         const soon = c.soon && !items.length;
-        const sub = soon ? 'Скоро' : c.id === 'favorites' && !items.length ? 'Нет избранных' : zWord(items.length);
         const now = !soon && collectionIsNow(c, ctx.prayers, min);
-        return `<button class="dhikr-tile tint-${c.tint} ${soon ? 'is-soon' : ''}" data-col="${c.id}" ${soon ? 'aria-disabled="true"' : ''}>
-          ${now ? '<span class="dhikr-now">Сейчас</span>' : ''}
-          <span class="dhikr-tile-icon">${c.icon}</span>
-          <b>${c.title}</b><span>${sub}</span>
+        // как смарт-списки «Напоминаний»: цветной круг с глифом, число справа, название внизу
+        return `<button class="dhikr-tile dhikr-col ${soon ? 'is-soon' : ''}" style="--t:var(--${c.tint})" data-col="${c.id}" ${soon ? 'aria-disabled="true"' : ''}>
+          <span class="dhikr-col-top"><span class="dhikr-col-icon">${icon[c.icon](20)}</span>${soon ? '' : `<span class="dhikr-col-count">${items.length}</span>`}</span>
+          <b>${c.title}</b>${now ? '<span class="dhikr-col-now">Сейчас</span>' : soon ? '<span>Скоро</span>' : ''}
         </button>`;
       }).join('');
       const t = dhikrTotals(getData(), todayKey());
