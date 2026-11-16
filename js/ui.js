@@ -120,12 +120,33 @@ export function heatmap(valueFn, color = 'var(--green)', { weeks = 53, cell = 11
         : `<rect x="${wk * step}" y="${top + d * step}" width="${cell}" height="${cell}" rx="3" class="hm-empty${today_}"><title>${dkey(date)} · 0%</title></rect>`;
     }
   }
-  return `<div class="heatmap-scroll"><svg class="heatmap" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${labels}${cells}</svg></div>`;
+  return `<div class="heatmap-scroll"><svg class="heatmap" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" data-step="${step}">${labels}${cells}</svg></div>`;
 }
 
-/** Прокрутить тепловые карты к текущей неделе. */
+/** Подписи месяцев, начало которых ушло за левый край, прячем — не показываем обрезок «н» от «июн». */
+function hideCutLabels(el) {
+  el.querySelectorAll('.hm-label').forEach((t) => {
+    t.style.visibility = Number(t.getAttribute('x')) < el.scrollLeft - 2 ? 'hidden' : '';
+  });
+}
+
+/** Прокрутить тепловые карты к текущей неделе так, чтобы левый край пришёлся на границу недели. */
 export function scrollHeatmaps(root = document) {
-  root.querySelectorAll('.heatmap-scroll').forEach((el) => (el.scrollLeft = el.scrollWidth));
+  root.querySelectorAll('.heatmap-scroll').forEach((el) => {
+    const svg = el.querySelector('svg');
+    const step = Number(svg?.dataset.step) || 0;
+    svg.style.marginRight = '';
+    const max = el.scrollWidth - el.clientWidth;
+    // отступ 2px у прокрутки: колонка k начинается с 2 + k·step — добиваем хвост справа до целой колонки
+    const rem = step && max > 0 ? (max - 2) % step : 0;
+    if (rem) svg.style.marginRight = `${step - rem}px`;
+    el.scrollLeft = el.scrollWidth;
+    hideCutLabels(el);
+    if (!el.dataset.hm) {
+      el.dataset.hm = '1';
+      el.addEventListener('scroll', () => hideCutLabels(el), { passive: true });
+    }
+  });
 }
 
 // ---------- Столбчатый график ----------
