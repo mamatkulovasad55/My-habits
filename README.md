@@ -99,6 +99,9 @@ Telegram ── Mini App (GitHub Pages) ──► Cloudflare Worker ──► my
 ## Тесты
 `node tests/run.mjs` — без зависимостей (Node 20+): миграции и слияние, API и бот, расход KV и ошибки, бэкап.
 
+Автотест экранов `tests/e2e/screens.mjs` (Playwright, iPhone, светлая и тёмная тема): все вкладки, достижения, зикры и экран блокировки — без ошибок JS, без горизонтальной прокрутки, кнопки нажимаются в зоне 44×44. Запускается на каждый PR (workflow «Checks»), снимки экранов — артефакт `screens` у прогона. Локально:
+`npm i --no-save playwright && npx playwright install chromium && node tests/e2e/screens.mjs` (снимки — в `tests/e2e/out`).
+
 ## Структура
 ```
 index.html            оболочка и нижняя панель вкладок

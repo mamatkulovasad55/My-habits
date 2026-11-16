@@ -191,7 +191,7 @@ function viewToday() {
       </div>
       <div class="head-actions">
         ${!isToday ? `<button class="pill" data-action="go-today">Сегодня</button>` : ''}
-        <button class="icon-btn dhikr-btn" data-action="open-dhikr" aria-label="Зикр">📿</button>
+        <button class="icon-btn dhikr-btn" data-action="open-dhikr" aria-label="Зикр">${icon.beads(20)}</button>
         <button class="icon-btn" data-action="add-habit" aria-label="Новая привычка">${icon.plus(22)}</button>
       </div>
       <input type="date" id="date-picker" class="visually-hidden" max="${todayKey()}" value="${key}" tabindex="-1">
