@@ -1726,7 +1726,7 @@ function viewProfile() {
       ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'Метод Узбекистана' : 'Сверено', emoji: '🕌', tint: 'var(--green)' })}
       ${navRow('juma', { label: 'Джума', value: st.juma.enabled ? 'Вкл' : 'Выкл', emoji: '🤲', tint: 'var(--green)' })}
       ${navRow('qada', { label: 'Каза', value: d.total ? `Осталось ${d.total}` : 'Нет долгов', emoji: '⏳', tint: 'var(--orange)' })}
-      ${navRow('hijri', { label: 'Хиджрийский календарь', value: formatHijri(toHijri(today(), st)), emoji: '☾', tint: 'var(--indigo, #5856D6)', below: true })}
+      ${navRow('hijri', { label: 'Хиджрийский календарь', value: formatHijri(toHijri(today(), st)), emoji: '☾', tint: 'var(--indigo)', below: true })}
     </div>
 
     <div class="group-title">Распорядок</div>

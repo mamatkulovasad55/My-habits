@@ -1,10 +1,11 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v15';
+const VERSION = 'v16';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './css/tokens.css',
   './css/styles.css',
   './js/app.js',
   './js/store.js',

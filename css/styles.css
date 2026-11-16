@@ -3,33 +3,42 @@
    ============================================================ */
 
 :root {
-  --bg: #F2F2F7;
-  --bg-elev: #FFFFFF;
-  --card: #FFFFFF;
-  --card-2: #F2F2F7;
-  --fill: rgba(120, 120, 128, 0.12);
-  --fill-2: rgba(120, 120, 128, 0.2);
-  --label: #000000;
-  --label-2: rgba(60, 60, 67, 0.6);
-  --label-3: rgba(60, 60, 67, 0.3);
-  --sep: rgba(60, 60, 67, 0.14);
+  /* Семантические переменные интерфейса. Значения берутся из
+     css/tokens.css (iOS 27, Figma); тёмная тема переключается там. */
+  --bg: var(--ios-bg-grouped-primary);
+  --bg-elev: var(--ios-bg-grouped-secondary);
+  --card: var(--ios-bg-grouped-secondary);
+  --card-2: var(--ios-bg-grouped-tertiary);
+  --fill: var(--ios-fill-tertiary);
+  --fill-2: var(--ios-fill-primary);
+  --label: var(--ios-label-primary);
+  --label-2: var(--ios-label-secondary);
+  --label-3: var(--ios-label-tertiary);
+  --label-4: var(--ios-label-quaternary);
+  --sep: var(--ios-separator);
+  --backdrop: var(--ios-overlay);
+  --sheet-bg: var(--ios-bg-grouped-primary-elevated);
+  --sheet-card: var(--ios-bg-grouped-secondary-elevated);
+  --segmented-on: var(--ios-segmented-selected);
+
+  --accent: var(--ios-blue);
+  --blue: var(--ios-blue);
+  --green: var(--ios-green);
+  --red: var(--ios-red);
+  --orange: var(--ios-orange);
+  --yellow: var(--ios-yellow);
+  --indigo: var(--ios-indigo);
+  --teal: var(--ios-teal);
+  --gray: var(--ios-gray);
+
+  /* Своё, в ките нет аналога */
   --ring-track: rgba(120, 120, 128, 0.14);
   --bar-bg: rgba(255, 255, 255, 0.78);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 18px rgba(0, 0, 0, 0.04);
-  --backdrop: rgba(0, 0, 0, 0.32);
-  --sheet-bg: #F2F2F7;
-  --sheet-card: #FFFFFF;
-
-  --accent: #007AFF;
-  --green: #34C759;
-  --red: #FF3B30;
-  --orange: #FF9500;
-  --blue: #007AFF;
-  --gray: #8E8E93;
 
   --radius: 18px;
   --radius-sm: 12px;
-  --gutter: 16px;
+  --gutter: var(--ios-space-l);
   --tabbar-h: 58px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
@@ -40,55 +49,17 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #000000;
-    --bg-elev: #1C1C1E;
-    --card: #1C1C1E;
-    --card-2: #2C2C2E;
-    --fill: rgba(118, 118, 128, 0.24);
-    --fill-2: rgba(118, 118, 128, 0.36);
-    --label: #FFFFFF;
-    --label-2: rgba(235, 235, 245, 0.6);
-    --label-3: rgba(235, 235, 245, 0.3);
-    --sep: rgba(84, 84, 88, 0.6);
     --ring-track: rgba(118, 118, 128, 0.26);
     --bar-bg: rgba(22, 22, 24, 0.78);
     --shadow: none;
-    --backdrop: rgba(0, 0, 0, 0.55);
-    --sheet-bg: #1C1C1E;
-    --sheet-card: #2C2C2E;
-    --accent: #0A84FF;
-    --green: #30D158;
-    --red: #FF453A;
-    --orange: #FF9F0A;
-    --blue: #0A84FF;
-    --gray: #8E8E93;
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #000000;
-  --bg-elev: #1C1C1E;
-  --card: #1C1C1E;
-  --card-2: #2C2C2E;
-  --fill: rgba(118, 118, 128, 0.24);
-  --fill-2: rgba(118, 118, 128, 0.36);
-  --label: #FFFFFF;
-  --label-2: rgba(235, 235, 245, 0.6);
-  --label-3: rgba(235, 235, 245, 0.3);
-  --sep: rgba(84, 84, 88, 0.6);
   --ring-track: rgba(118, 118, 128, 0.26);
   --bar-bg: rgba(22, 22, 24, 0.78);
   --shadow: none;
-  --backdrop: rgba(0, 0, 0, 0.55);
-  --sheet-bg: #1C1C1E;
-  --sheet-card: #2C2C2E;
-  --accent: #0A84FF;
-  --green: #30D158;
-  --red: #FF453A;
-  --orange: #FF9F0A;
-  --blue: #0A84FF;
-  --gray: #8E8E93;
   color-scheme: dark;
 }
 
@@ -108,7 +79,7 @@ body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--label);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--ios-font-family);
   font-size: 17px;
   line-height: 1.35;
   letter-spacing: -0.01em;
@@ -578,7 +549,7 @@ a { color: inherit; text-decoration: none; }
 }
 .ach b { font-size: 15px; letter-spacing: -0.015em; color: var(--label-2); }
 .ach span { font-size: 12px; color: var(--label-3); }
-.ach.is-ok .ach-emoji { filter: none; opacity: 1; background: linear-gradient(145deg, color-mix(in srgb, var(--orange) 26%, transparent), color-mix(in srgb, #FFCC00 18%, transparent)); }
+.ach.is-ok .ach-emoji { filter: none; opacity: 1; background: linear-gradient(145deg, color-mix(in srgb, var(--orange) 26%, transparent), color-mix(in srgb, var(--yellow) 18%, transparent)); }
 .ach.is-ok b { color: var(--label); }
 .ach.is-ok span { color: var(--label-2); }
 
@@ -762,12 +733,10 @@ a { color: inherit; text-decoration: none; }
   transition: background 0.25s var(--ease), box-shadow 0.25s;
 }
 .segmented button.is-active {
-  background: var(--bg-elev);
+  background: var(--segmented-on);
   font-weight: 600;
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.1);
 }
-:root[data-theme="dark"] .segmented button.is-active { background: #636366; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .segmented button.is-active { background: #636366; } }
 
 .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; justify-items: center; }
 .swatch {
@@ -1204,7 +1173,7 @@ body.is-gate .tabbar { display: none; }
 .dhikr-tile > span:last-child { font-size: 14px; color: var(--label-2); }
 .dhikr-tile-icon { position: absolute; top: 14px; left: 16px; font-size: 30px; line-height: 1; }
 .dhikr-tile > .ring { position: absolute; top: 14px; left: 16px; }
-.dhikr-tile.tint-green { background: linear-gradient(160deg, #34C759, #248A3D); color: #fff; }
+.dhikr-tile.tint-green { background: linear-gradient(160deg, var(--green), #248A3D); color: #fff; }
 .dhikr-tile.tint-orange { background: linear-gradient(160deg, #FFB340, #FF9500); color: #fff; }
 .dhikr-tile.tint-morning { background: linear-gradient(160deg, #A78BFA, #F0A5B4); color: #fff; }
 .dhikr-tile.tint-evening { background: linear-gradient(160deg, #F2A65A, #E5484D); color: #fff; }
@@ -1361,7 +1330,7 @@ body:has(.storage-warn) .view { padding-bottom: calc(var(--tabbar-h) + var(--saf
 .ach-card-icons { display: flex; gap: 4px; flex: none; }
 .ach-mini {
   width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 18px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--orange) 26%, transparent), color-mix(in srgb, #FFCC00 18%, transparent));
+  background: linear-gradient(145deg, color-mix(in srgb, var(--orange) 26%, transparent), color-mix(in srgb, var(--yellow) 18%, transparent));
 }
 .ach .ach-date { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--green); }
 .ach-progress { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
