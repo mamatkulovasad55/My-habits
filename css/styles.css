@@ -313,6 +313,9 @@ a { color: inherit; text-decoration: none; }
   background: color-mix(in srgb, var(--c) 14%, transparent);
   transition: transform 0.2s var(--ease), background 0.25s, color 0.25s;
 }
+/* круг 40 px, нажатие ловится в 44×44 */
+.act { position: relative; }
+.act::after { content: ''; position: absolute; inset: -2px; border-radius: 50%; }
 .act:active { transform: scale(0.86); }
 .act-check { color: var(--label-3); background: transparent; box-shadow: inset 0 0 0 2px var(--fill-2); }
 .act-check.is-done {
@@ -993,7 +996,8 @@ select.field.compact { padding-right: 30px; }
 .next-stage { color: var(--label); font-weight: 500; }
 .hcard.is-done .next-stage { color: var(--label-2); }
 
-.list-tools { display: flex; justify-content: space-between; gap: 12px; padding: 10px 4px 0; }
+.list-tools { display: flex; justify-content: space-between; gap: 12px; padding: 4px 4px 0; }
+.list-tools .link-btn { min-height: 44px; }
 
 .banner { border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); }
 .banner-title { font-weight: 600; font-size: var(--ios-headline); letter-spacing: var(--ios-headline-ls); line-height: var(--ios-headline-lh); }
@@ -1192,7 +1196,6 @@ body.is-gate .tabbar { display: none; }
 .form-grid.three { grid-template-columns: 1fr 1fr 1fr; }
 
 /* ---------- Счётчик зикров ---------- */
-.dhikr-btn { font-size: 20px; }
 .sheet.sheet-full { max-width: 560px; height: calc(100dvh - var(--safe-t) - 12px); max-height: none; }
 .dhikr-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 0 16px calc(var(--safe-b) + 14px); }
 .dhikr-text { text-align: center; padding: 6px 4px 0; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
