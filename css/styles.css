@@ -1328,6 +1328,7 @@ body.is-gate .tabbar { display: none; }
   letter-spacing: var(--ios-subheadline-ls);
 }
 .row .nav-chev svg, .nav-chev { color: var(--label-3); flex: none; display: inline-flex; }
+.row .nav-ic svg { color: #fff; } /* значок на цветной плашке — всегда белый */
 
 .sub-head { padding: 8px 0 6px; }
 .sub-head h1 { margin: 6px 2px 0; font-size: var(--ios-title-1); line-height: var(--ios-title-1-lh); font-weight: 700; letter-spacing: var(--ios-title-1-ls); }

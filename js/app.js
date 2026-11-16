@@ -1624,9 +1624,12 @@ function syncStatusHTML() {
   return `<span class="status-dot" style="background:var(--${c})"></span><span>${esc(text)}</span>`;
 }
 
+/** Для строки «Данные»: в одну строку — «✓ 21:48» вместо «Синхронизировано · 21:48». */
 const syncStatusShort = () => {
   const s = sync.getStatus();
-  return s.state === 'offline' ? 'Нет сети' : syncStatusParts()[1];
+  if (s.state === 'offline') return 'Нет сети';
+  if (s.state === 'idle' && s.last) return `✓ ${new Date(s.last).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+  return syncStatusParts()[1];
 };
 
 const NIYYAH_MAX = 300;
@@ -1676,9 +1679,9 @@ function tzValue(st) {
   return st.tzAuto !== false ? `Авто · ${tzLabel(st.tz)}` : `${st.tz.split('/').pop().replace(/_/g, ' ')} · ${tzLabel(st.tz)}`;
 }
 
-function navRow(sub, { label, value = '', emoji, tint = 'var(--accent)', below = false }) {
+function navRow(sub, { label, value = '', glyph, tint = 'var(--accent)', below = false }) {
   return `<button class="row nav-row" data-nav="${sub}">
-    <span class="nav-ic" style="--c:${tint}">${emoji}</span>
+    <span class="nav-ic" style="--c:${tint}">${icon[glyph](18)}</span>
     ${below ? `<span class="nav-label nav-stack"><span>${esc(label)}</span><span class="nav-sub">${esc(value)}</span></span><span class="nav-val"></span>` : `<span class="nav-label">${esc(label)}</span>
     <span class="nav-val" ${sub === 'data' ? 'id="sync-short"' : ''}>${esc(value)}</span>`}
     <span class="nav-chev">${icon.chevronR(16)}</span>
@@ -1726,31 +1729,31 @@ function viewProfile() {
 
     <div class="group-title">Личные параметры</div>
     <div class="card list-group">
-      ${navRow('city', { label: 'Город', value: st.prayer.city || '—', emoji: '📍', tint: 'var(--red)' })}
-      ${navRow('tz', { label: 'Часовой пояс', value: tzValue(st), emoji: '🕰', tint: 'var(--blue)' })}
-      ${navRow('madhab', { label: 'Мазхаб', value: MADHAB_LABEL[st.prayer.asr] || MADHAB_LABEL.hanafi, emoji: '📖', tint: 'var(--green)' })}
+      ${navRow('city', { label: 'Город', value: st.prayer.city || '—', glyph: 'pin', tint: 'var(--red)' })}
+      ${navRow('tz', { label: 'Часовой пояс', value: tzValue(st), glyph: 'clock', tint: 'var(--blue)' })}
+      ${navRow('madhab', { label: 'Мазхаб', value: MADHAB_LABEL[st.prayer.asr] || MADHAB_LABEL.hanafi, glyph: 'book', tint: 'var(--green)' })}
     </div>
 
     <div class="group-title">Намаз</div>
     <div class="card list-group">
-      ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'Метод Узбекистана' : 'Сверено', emoji: '🕌', tint: 'var(--green)' })}
-      ${navRow('juma', { label: 'Джума', value: st.juma.enabled ? 'Вкл' : 'Выкл', emoji: '🤲', tint: 'var(--green)' })}
-      ${navRow('qada', { label: 'Каза', value: d.total ? `Осталось ${d.total}` : 'Нет долгов', emoji: '⏳', tint: 'var(--orange)' })}
-      ${navRow('hijri', { label: 'Хиджрийский календарь', value: formatHijri(toHijri(today(), st)), emoji: '☾', tint: 'var(--indigo)', below: true })}
+      ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'Метод Узбекистана' : 'Сверено', glyph: 'dome', tint: 'var(--green)' })}
+      ${navRow('juma', { label: 'Джума', value: st.juma.enabled ? 'Вкл' : 'Выкл', glyph: 'calendar', tint: 'var(--green)' })}
+      ${navRow('qada', { label: 'Каза', value: d.total ? `Осталось ${d.total}` : 'Нет долгов', glyph: 'hourglass', tint: 'var(--orange)' })}
+      ${navRow('hijri', { label: 'Хиджрийский календарь', value: formatHijri(toHijri(today(), st)), glyph: 'moon', tint: 'var(--indigo)', below: true })}
     </div>
 
     <div class="group-title">Распорядок</div>
     <div class="card list-group">
-      ${navRow('routine', { label: 'Режим дня', value: `${st.wakeWd}–${st.sleepWd}`, emoji: '☀︎', tint: 'var(--orange)' })}
-      ${navRow('reminders', { label: 'Напоминания', value: st.checkin.enabled ? st.checkin.time : 'выкл', emoji: '🔔', tint: 'var(--red)' })}
+      ${navRow('routine', { label: 'Режим дня', value: `${st.wakeWd}–${st.sleepWd}`, glyph: 'sun', tint: 'var(--orange)' })}
+      ${navRow('reminders', { label: 'Напоминания', value: st.checkin.enabled ? st.checkin.time : 'Выкл', glyph: 'bell', tint: 'var(--red)' })}
     </div>
 
     <div class="group-title">Приложение</div>
     <div class="card list-group">
-      ${navRow('theme', { label: 'Оформление', value: THEME_LABEL[st.theme] || THEME_LABEL.system, emoji: '◐', tint: 'var(--gray)' })}
-      ${navRow('privacy', { label: 'Конфиденциальность', value: protectedOn() ? 'вкл' : 'выкл', emoji: '🔒', tint: 'var(--blue)' })}
-      ${navRow('archive', { label: 'Архив привычек', value: archived ? String(archived) : 'пусто', emoji: '🗄', tint: 'var(--gray)' })}
-      ${navRow('data', { label: 'Данные', value: syncStatusShort(), emoji: '☁︎', tint: 'var(--blue)' })}
+      ${navRow('theme', { label: 'Оформление', value: THEME_LABEL[st.theme] || THEME_LABEL.system, glyph: 'contrast', tint: 'var(--gray)' })}
+      ${navRow('privacy', { label: 'Конфиденциальность', value: protectedOn() ? 'Вкл' : 'Выкл', glyph: 'lock', tint: 'var(--blue)' })}
+      ${navRow('archive', { label: 'Архив привычек', value: archived ? String(archived) : 'Пусто', glyph: 'archive', tint: 'var(--gray)' })}
+      ${navRow('data', { label: 'Данные', value: syncStatusShort(), glyph: 'cloud', tint: 'var(--blue)' })}
     </div>
     <p class="footnote">My Habits · данные принадлежат только тебе</p>
   `;
