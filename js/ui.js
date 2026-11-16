@@ -155,7 +155,7 @@ export const syncBackButton = () => tg.backButton(sheets.length > 0 || Boolean(b
  * Открыть шторку. render() возвращает HTML; если live=true —
  * содержимое перерисовывается при изменении данных.
  */
-export function openSheet({ render, mount, live = false, className = '', onClose, swipe = true }) {
+export function openSheet({ render, mount, live = false, className = '', onClose, swipe = true, private: isPrivate = false }) {
   const backdrop = document.createElement('div');
   backdrop.className = 'sheet-backdrop';
   const el = document.createElement('div');
@@ -169,6 +169,7 @@ export function openSheet({ render, mount, live = false, className = '', onClose
   const api = {
     el,
     live,
+    private: isPrivate, // шторка защищённого раздела — закрывается при блокировке
     refresh() {
       const scroll = el.querySelector('.sheet-body')?.scrollTop || 0;
       el.innerHTML = `<div class="sheet-grabber"></div>${render(api)}`;
@@ -238,6 +239,13 @@ function enableSwipeToClose(el, api) {
 
 export const refreshLiveSheets = () => sheets.forEach((s) => s.live && s.refresh());
 export const topSheet = () => sheets[sheets.length - 1];
+/** Закрыть шторки защищённого раздела (при повторной блокировке). */
+export function closePrivateSheets(all = false) {
+  // всё, что открыто поверх шторки раздела (подтверждение удаления, срыва), тоже закрывается
+  const i = all ? 0 : sheets.findIndex((s) => s.private);
+  if (i < 0) return;
+  [...sheets.slice(i)].reverse().forEach((s) => s.close());
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && sheets.length) sheets[sheets.length - 1].close();

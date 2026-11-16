@@ -6,6 +6,7 @@ import {
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
+import { protectedOn, isLocked, unlock, lockNow, noteLeave, noteReturn, checkRelock, onLockChange, bioInit, bio, bioLabel, bioEnabled, setBioEnabled, bioRequestAccess, bioAuthenticate, bioOpenSettings } from './lock.js';
 import { storage, storageGet, storageSet, storageRemove, storageFailed, onStorageStatus } from './storage.js';
 import * as tg from './tg.js';
 import { WORKER_URL } from './config.js';
@@ -23,7 +24,7 @@ import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, ro
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
   COLORS, HABIT_EMOJI, ABSTAIN_EMOJI, icon, ring, animateRings, heatmap, scrollHeatmaps, barChart,
-  weekdayLetter, openSheet, refreshLiveSheets, confirmSheet, toast, haptic, segmented, topSheet, setBaseBack, syncBackButton,
+  weekdayLetter, openSheet, refreshLiveSheets, confirmSheet, toast, haptic, segmented, topSheet, setBaseBack, syncBackButton, closePrivateSheets,
 } from './ui.js';
 import {
   uid, dkey, parseKey, today, todayKey, addDays, startOfWeek, esc, plural, fmtDayLong, fmtDateShort, fmtDateTime,
@@ -78,6 +79,7 @@ function render() {
   animateRings(view);
   scrollHeatmaps(view);
   if (state.route === 'profile') mountProfile();
+  if (state.route === 'abstain') mountLockScreen();
   if (state.route === 'today') {
     mountReorder();
     const note = document.getElementById('day-note');
@@ -101,7 +103,14 @@ function route() {
   // #settings — старая ссылка на настройки, теперь это Профиль; #profile/qada — сразу раздел
   const [name, sub] = r.split('/');
   if (sub) while (topSheet()) topSheet().close(); // ссылка «Профиль → …» из шторки
+  const prev = state.route;
   state.route = name === 'settings' ? 'profile' : ROUTES.includes(name) ? name : 'today';
+  // защита «Воздержания»: ушли с раздела — блокировка (сразу или по таймеру), вернулись — проверка таймера
+  if (prev === 'abstain' && state.route !== 'abstain') noteLeave();
+  if (state.route === 'abstain') {
+    checkRelock();
+    noteReturn();
+  }
   state.sub = state.route === 'profile' && PROFILE_SUBS[sub] ? sub : null;
   if (state.sub !== 'tz') tzQuery = '';
   state.reorder = false;
@@ -156,7 +165,7 @@ function viewToday() {
       </section>`
     : '';
 
-  const abst = abstainAll();
+  const abst = isLocked() ? [] : abstainAll(); // защищённый раздел не показываем вовсе
   const abstChips = abst.length && isToday
     ? `<a class="abst-strip" href="#abstain">${abst
         .map((a) => `<span class="abst-chip" style="--c:${a.color}"><span>${esc(a.emoji)}</span><b data-live-abs-short="${a.id}">${fmtDuration(abstainElapsed(a))}</b></span>`)
@@ -330,7 +339,7 @@ function openCheckin() {
       const key = todayKey();
       const t = today();
       const left = habitsActive().filter((h) => isScheduled(h, t) && !isDone(h, key));
-      const abst = abstainAll();
+      const abst = isLocked() ? [] : abstainAll();
       return `
         <header class="sheet-header"><span></span><strong>Вечерний чек-ин</strong><button class="link-btn strong" data-c="close">Готово</button></header>
         <div class="sheet-body">
@@ -1244,6 +1253,7 @@ function timerHTML(ms) {
 }
 
 function viewAbstain() {
+  if (isLocked()) return lockScreen();
   const list = abstainAll();
   const tk = todayKey();
   const cards = list
@@ -1328,6 +1338,7 @@ function openAbstainEditor(existing) {
     return `${dkey(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
   openSheet({
+    private: true,
     render: () => `
       <header class="sheet-header">
         <button class="link-btn" data-e="cancel">Отмена</button>
@@ -1388,6 +1399,7 @@ function openAbstainEditor(existing) {
 function openAbstainDetail(id) {
   let month = new Date(today().getFullYear(), today().getMonth(), 1);
   openSheet({
+    private: true,
     live: true,
     render: (api) => {
       const a = findAbstain(id);
@@ -1504,14 +1516,17 @@ function openAbstainDetail(id) {
 
 function viewStats() {
   const habits = habitsActive();
-  const abst = abstainAll();
-  if (!habits.length && !abst.length) {
+  const locked = isLocked();
+  const abstAny = abstainAll();
+  const abst = locked ? [] : abstAny;
+  if (!habits.length && !abstAny.length) {
     return `
       <header class="page-head"><div><div class="eyebrow">Обзор</div><h1>Статистика</h1></div></header>
       <div class="empty"><div class="empty-emoji">📊</div><h2>Пока нет данных</h2><p>Добавь привычки — здесь появятся серии, проценты, тепловая карта и достижения.</p></div>`;
   }
   const t = today();
   const ach = achievements();
+  if (locked) ach.list = ach.list.filter((x) => !x.abst); // достижения воздержания выдают раздел
   const bars = Array.from({ length: 14 }, (_, i) => {
     const d = addDays(t, i - 13);
     return { label: weekdayLetter(d), value: dayStats(d).ratio, highlight: i === 13 };
@@ -1564,6 +1579,7 @@ function viewStats() {
     <div class="group-title">Привычки · за 30 дней</div>
     <div class="card list-group">${habitRows}</div>` : ''}
     ${abst.length ? `<div class="group-title">Воздержание</div><div class="card list-group">${abstRows}</div>` : ''}
+    ${locked && abstAny.length ? `<a class="card pad lock-plate" href="#abstain"><span>🔒</span><span><b>Раздел защищён</b><br><span class="muted small">Открыть</span></span>${icon.chevronR(16)}</a>` : ''}
     ${dhikrStatsSection()}
     <div class="group-title">Достижения · ${unlocked} из ${ach.list.length}</div>
     <div class="ach-grid">${ach.list.map((x) => `<div class="ach ${x.ok ? 'is-ok' : ''}"><div class="ach-emoji">${x.emoji}</div><b>${esc(x.title)}</b><span>${esc(x.desc)}</span></div>`).join('')}</div>
@@ -1642,6 +1658,7 @@ const PROFILE_SUBS = {
   reminders: { title: 'Напоминания', body: () => notificationsSection() },
   theme: { title: 'Оформление', body: () => themeSection() },
   archive: { title: 'Архив привычек', body: () => archiveSection() },
+  privacy: { title: 'Конфиденциальность', body: () => privacySection() },
   data: { title: 'Данные', body: () => dataSection() },
 };
 
@@ -1724,6 +1741,7 @@ function viewProfile() {
     <div class="group-title">Приложение</div>
     <div class="card list-group">
       ${navRow('theme', { label: 'Оформление', value: THEME_LABEL[st.theme] || THEME_LABEL.system, emoji: '◐', tint: 'var(--gray)' })}
+      ${navRow('privacy', { label: 'Конфиденциальность', value: protectedOn() ? 'вкл' : 'выкл', emoji: '🔒', tint: 'var(--blue)' })}
       ${navRow('archive', { label: 'Архив привычек', value: archived ? String(archived) : 'пусто', emoji: '🗄', tint: 'var(--gray)' })}
       ${navRow('data', { label: 'Данные', value: syncStatusShort(), emoji: '☁︎', tint: 'var(--blue)' })}
     </div>
@@ -2300,33 +2318,16 @@ function mountProfile() {
   if (niy) niy.onclick = () => openNiyyahEditor();
   mountPrefs();
   mountTz();
+  mountPrivacy();
   const q = (s) => view.querySelector(`[data-s=${s}]`);
   if (q('now')) q('now').onclick = () => sync.syncNow();
   view.querySelectorAll('[data-seg=theme] button').forEach((b) => (b.onclick = () => setSetting('theme', b.dataset.value)));
   view.querySelectorAll('[data-restore]').forEach((b) => (b.onclick = () => upsertHabit({ id: b.dataset.restore, archived: false })));
   if (!q('backup')) return;
-  q('backup').onclick = async (e) => {
-    const b = e.currentTarget;
-    b.disabled = true;
-    try {
-      await sync.syncNow();
-      const r = await sync.api('/api/backup', {});
-      toast(`Бэкап отправлен в бота · ${r.events} ${plural(r.events, ['событие', 'события', 'событий'])}`);
-    } catch (err) {
-      toast(err.message || 'Не удалось отправить бэкап');
-    } finally {
-      b.disabled = false;
-    }
-  };
-  q('export').onclick = () => {
-    const blob = new Blob([stableStringify(getData(), 1)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `my-habits-${todayKey()}.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
+  q('backup').onclick = (e) => requireAuth('Прислать бэкап', () => sendBackupNow(e.currentTarget));
+  q('export').onclick = () => requireAuth('Экспорт в JSON', exportJSON);
   q('import').onchange = async (e) => {
+
     const file = e.target.files[0];
     if (!file) return;
     try {
@@ -2411,6 +2412,358 @@ onStorageStatus((fail) => {
 });
 sync.onStatus(() => storageFailed() && renderStorageWarn());
 window.addEventListener('offline', () => storageFailed() && renderStorageWarn());
+
+async function sendBackupNow(b) {
+  if (b) b.disabled = true;
+  try {
+    await sync.syncNow();
+    const r = await sync.api('/api/backup', {});
+    toast(`Бэкап отправлен в бота · ${r.events} ${plural(r.events, ['событие', 'события', 'событий'])}`);
+  } catch (err) {
+    toast(err.message || 'Не удалось отправить бэкап');
+  } finally {
+    if (b) b.disabled = false;
+  }
+}
+
+function exportJSON() {
+  const blob = new Blob([stableStringify(getData(), 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `my-habits-${todayKey()}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ============================================================
+// Защита «Воздержания»: экран блокировки, подтверждение кодом, задание кода
+// ============================================================
+
+/** Запрос к /api/lock/* — возвращает тело ответа вместе с HTTP-статусом (нужны retryIn и hasCode при ошибке). */
+async function lockCall(path, body = {}) {
+  if (navigator.onLine === false) return { ok: false, offline: true, error: 'Нет сети — код проверяется на сервере' };
+  try {
+    const res = await fetch(`${WORKER_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg.initData() },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+    const j = await res.json().catch(() => ({}));
+    return { status: res.status, ...j, ok: res.ok && j.ok !== false };
+  } catch {
+    return { ok: false, offline: navigator.onLine === false, error: 'Сервер недоступен, попробуй ещё раз' };
+  }
+}
+
+const fmtWait = (s) => (s >= 60 ? `${Math.ceil(s / 60)} мин` : `${s} с`);
+const PIN_LEN = 4;
+
+/** Клавиатура кода. bioAttr — атрибуты кнопки биометрии в пустой клетке слева от 0 (как в iOS). */
+function pinPadHTML(pin, bioAttr = '') {
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'bio', '0', 'del'];
+  const key = (k) => {
+    if (k === 'bio') return bioAttr ? `<button class="pin-key is-text" ${bioAttr}>${esc(bioLabel())}</button>` : '<span></span>';
+    return `<button class="pin-key ${k === 'del' ? 'is-text' : ''}" data-pin="${k}" aria-label="${k === 'del' ? 'Стереть' : k}">${k === 'del' ? '⌫' : k}</button>`;
+  };
+  return `<div class="pin-dots" aria-hidden="true">${Array.from({ length: PIN_LEN }, (_, i) => `<i class="${i < pin.length ? 'is-on' : ''}"></i>`).join('')}</div>
+    <div class="pin-pad">${keys.map(key).join('')}</div>`;
+}
+
+/** Клавиатура: state.pin меняется на месте, точки обновляются без перерисовки; при 4 цифрах — onFull(pin). */
+function mountPinPad(root, st, onFull) {
+  const dots = () => root.querySelectorAll('.pin-dots i').forEach((n, i) => n.classList.toggle('is-on', i < st.pin.length));
+  root.querySelectorAll('[data-pin]').forEach((b) => (b.onclick = () => {
+    if (st.busy || st.wait?.()) return;
+    const k = b.dataset.pin;
+    if (k === 'del') st.pin = st.pin.slice(0, -1);
+    else if (st.pin.length < PIN_LEN) st.pin += k;
+    tg.haptic('light');
+    dots();
+    if (st.pin.length === PIN_LEN) onFull(st.pin);
+  }));
+}
+
+// ---------- Экран блокировки на вкладке ----------
+
+const lockUi = { pin: '', err: '', until: 0, hasCode: null, busy: false, autoTried: false, loading: false };
+const lockWait = () => Math.max(0, Math.ceil((lockUi.until - Date.now()) / 1000));
+lockUi.wait = lockWait;
+
+function resetLockUi() {
+  Object.assign(lockUi, { pin: '', err: '', hasCode: null, busy: false, autoTried: false });
+}
+
+function lockMessage() {
+  const wait = lockWait();
+  if (wait) return `Слишком много попыток. Повтори через <b data-lock-timer>${fmtWait(wait)}</b>`;
+  if (lockUi.err) return esc(lockUi.err);
+  if (navigator.onLine === false) return `Нет сети — код проверяется на сервере${bioEnabled() ? `. Открой по ${bioLabel()}` : ''}`;
+  return 'Введи код';
+}
+
+function lockScreen() {
+  const head = `<header class="page-head"><div><div class="eyebrow">Сила воли</div><h1>Воздержание</h1></div></header>`;
+  if (lockUi.hasCode === false) {
+    return `${head}<div class="lock-screen">
+      <div class="lock-icon">🔑</div><h2>Код сброшен</h2>
+      <p class="muted">Задай новый код — данные на месте.</p>
+      <button class="btn btn-primary" data-action="lock-newcode">Задать новый код</button>
+    </div>`;
+  }
+  return `${head}<div class="lock-screen">
+    <div class="lock-icon">🔒</div><h2>Раздел защищён</h2>
+    <p class="lock-msg ${lockUi.err ? 'is-err' : ''}" data-lock-msg>${lockMessage()}</p>
+    ${pinPadHTML(lockUi.pin, bioEnabled() ? 'data-action="lock-bio"' : '')}
+    <button class="link-btn small lock-forgot" data-action="lock-forgot">Забыл код</button>
+  </div>`;
+}
+
+async function lockStatus() {
+  if (lockUi.loading) return;
+  lockUi.loading = true;
+  const r = await lockCall('/api/lock/status');
+  lockUi.loading = false;
+  if (r.hasCode === undefined) return;
+  lockUi.hasCode = r.hasCode;
+  if (!r.hasCode) setBioEnabled(false); // код сброшен через бота — биометрия тоже
+  if (r.retryIn) lockUi.until = Date.now() + r.retryIn * 1000;
+  if (state.route === 'abstain' && isLocked()) render();
+}
+
+function lockTryBio() {
+  bioAuthenticate().then((ok) => {
+    if (ok) unlock(); // отмена — остаёмся на вводе кода
+  });
+}
+
+function mountLockScreen() {
+  const root = view.querySelector('.lock-screen');
+  if (!root) return;
+  if (lockUi.hasCode === null) lockStatus();
+  mountPinPad(root, lockUi, async (code) => {
+    lockUi.busy = true;
+    const r = await lockCall('/api/lock/verify', { code });
+    lockUi.busy = false;
+    lockUi.pin = '';
+    if (r.ok) {
+      lockUi.err = '';
+      tg.haptic('success');
+      return unlock();
+    }
+    tg.haptic('warning');
+    lockUi.err = r.error || 'Неверный код';
+    if (r.retryIn) lockUi.until = Date.now() + r.retryIn * 1000;
+    if (r.hasCode === false) lockUi.hasCode = false;
+    render();
+  });
+  if (bioEnabled() && !lockUi.autoTried && !lockWait()) {
+    lockUi.autoTried = true;
+    lockTryBio();
+  }
+}
+
+function lockForgot() {
+  confirmSheet({
+    title: 'Сбросить код?',
+    message: 'Бот пришлёт сообщение с кнопкой «Сбросить код». После нажатия задашь новый код — данные раздела останутся на месте.',
+    confirm: 'Прислать в бота',
+    onConfirm: async () => {
+      const r = await lockCall('/api/lock/forgot');
+      if (r.ok && r.hasCode === false) return (lockUi.hasCode = false), render();
+      toast(r.ok ? (r.sent === false ? r.error : 'Сообщение отправлено — открой чат с ботом') : r.error || 'Не получилось');
+    },
+  });
+}
+
+// ---------- Подтверждение кодом или биометрией (экспорт, бэкап, выключение защиты) ----------
+
+/** Защита выключена — сразу onOk(). Иначе шторка: биометрия (если включена) или код. onOk({ code } | { bio: true }). */
+function requireAuth(title, onOk) {
+  if (!protectedOn()) return onOk({});
+  const st = { pin: '', err: '', until: 0, busy: false };
+  st.wait = () => Math.max(0, Math.ceil((st.until - Date.now()) / 1000));
+  const sheet = openSheet({
+    className: 'sheet-compact',
+    render: () => `
+      <header class="sheet-header"><button class="link-btn" data-a="cancel">Отмена</button><strong>${esc(title)}</strong><span></span></header>
+      <div class="sheet-body"><div class="lock-sheet">
+        <p class="lock-msg ${st.err ? 'is-err' : ''}">${st.wait() ? `Слишком много попыток. Повтори через ${fmtWait(st.wait())}` : st.err ? esc(st.err) : 'Введи код раздела «Воздержание»'}</p>
+        ${pinPadHTML(st.pin, bioEnabled() ? 'data-a="bio"' : '')}
+      </div></div>`,
+    mount: (api) => {
+      api.el.querySelector('[data-a=cancel]').onclick = () => api.close();
+      const bioBtn = api.el.querySelector('[data-a=bio]');
+      if (bioBtn) bioBtn.onclick = () => bioAuthenticate().then((ok) => ok && (api.close(), onOk({ bio: true })));
+      mountPinPad(api.el, st, async (code) => {
+        st.busy = true;
+        const r = await lockCall('/api/lock/verify', { code });
+        st.busy = false;
+        st.pin = '';
+        if (r.ok) {
+          api.close();
+          return onOk({ code });
+        }
+        tg.haptic('warning');
+        st.err = r.hasCode === false ? 'Код сброшен — задай новый в Профиле → Конфиденциальность' : r.error || 'Неверный код';
+        if (r.retryIn) st.until = Date.now() + r.retryIn * 1000;
+        api.refresh();
+      });
+    },
+  });
+  if (bioEnabled()) bioAuthenticate().then((ok) => ok && (sheet.close(), onOk({ bio: true })));
+}
+
+// ---------- Задать или сменить код ----------
+
+/**
+ * Шаги: [текущий код] → новый → повтор. needCurrent — код уже есть на сервере (смена).
+ * Если текущий подтверждён биометрией — сначала /clear, затем /set без текущего.
+ */
+function openSetCode({ needCurrent = false, title = 'Код раздела', onDone } = {}) {
+  const st = { step: needCurrent ? 'current' : 'new', pin: '', first: '', current: '', viaBio: false, err: '', busy: false, until: 0 };
+  st.wait = () => Math.max(0, Math.ceil((st.until - Date.now()) / 1000));
+  const prompts = { current: 'Введи текущий код', new: 'Придумай код из 4 цифр', repeat: 'Повтори код' };
+  openSheet({
+    className: 'sheet-compact',
+    render: () => `
+      <header class="sheet-header"><button class="link-btn" data-a="cancel">Отмена</button><strong>${esc(title)}</strong><span></span></header>
+      <div class="sheet-body"><div class="lock-sheet">
+        <p class="lock-msg ${st.err ? 'is-err' : ''}">${st.wait() ? `Слишком много попыток. Повтори через ${fmtWait(st.wait())}` : st.err ? esc(st.err) : prompts[st.step]}</p>
+        ${pinPadHTML(st.pin, st.step === 'current' && bioEnabled() ? 'data-a="bio"' : '')}
+        ${st.step !== 'current' ? '<p class="hint center">Код хранится только на сервере в зашифрованном виде. Если забудешь — сбросишь через бота.</p>' : ''}
+      </div></div>`,
+    mount: (api) => {
+      api.el.querySelector('[data-a=cancel]').onclick = () => api.close();
+      const bioBtn = api.el.querySelector('[data-a=bio]');
+      if (bioBtn) bioBtn.onclick = () => bioAuthenticate().then((ok) => {
+        if (!ok) return;
+        Object.assign(st, { viaBio: true, step: 'new', err: '' });
+        api.refresh();
+      });
+      mountPinPad(api.el, st, async (pin) => {
+        st.pin = '';
+        st.err = '';
+        if (st.step === 'current') {
+          Object.assign(st, { current: pin, step: 'new' });
+          return api.refresh();
+        }
+        if (st.step === 'new') {
+          Object.assign(st, { first: pin, step: 'repeat' });
+          return api.refresh();
+        }
+        if (pin !== st.first) {
+          Object.assign(st, { step: 'new', first: '', err: 'Коды не совпали — придумай ещё раз' });
+          tg.haptic('warning');
+          return api.refresh();
+        }
+        st.busy = true;
+        if (st.viaBio) await lockCall('/api/lock/clear');
+        const r = await lockCall('/api/lock/set', st.viaBio || !needCurrent ? { code: pin } : { code: pin, current: st.current });
+        st.busy = false;
+        if (r.ok) {
+          tg.haptic('success');
+          api.close();
+          resetLockUi();
+          lockUi.hasCode = true;
+          return onDone?.();
+        }
+        tg.haptic('warning');
+        if (r.retryIn) st.until = Date.now() + r.retryIn * 1000;
+        // неверный текущий код — заново с него; иначе — с нового
+        Object.assign(st, { step: needCurrent && !st.viaBio && (r.reason === 'wrong' || r.reason === 'pause') ? 'current' : 'new', first: '', err: r.error || 'Не получилось' });
+        api.refresh();
+      });
+    },
+  });
+}
+
+/** Предложить биометрию после включения защиты (только iPhone с Face ID / Touch ID). */
+function offerBio() {
+  if (!bio().available || bioEnabled()) return;
+  confirmSheet({
+    title: `Открывать по ${bioLabel()}?`,
+    message: 'Раздел будет открываться без ввода кода. Код останется запасным способом.',
+    confirm: 'Включить',
+    onConfirm: enableBio,
+  });
+}
+
+async function enableBio() {
+  const granted = await bioRequestAccess();
+  setBioEnabled(granted);
+  if (!granted) toast(`Доступ к ${bioLabel()} запрещён — можно разрешить в настройках`);
+  render();
+}
+
+// ---------- Профиль → Конфиденциальность ----------
+
+const RELOCK_OPTIONS = [{ value: 'now', label: 'Сразу' }, { value: '1m', label: 'Через 1 мин' }, { value: '5m', label: 'Через 5 мин' }];
+
+function privacySection() {
+  const p = getData().settings.privacy || {};
+  const b = bio();
+  const on = protectedOn();
+  return `<div class="card pad">
+      <label class="switch-row"><span><b>Защитить «Воздержание»</b><br><span class="muted small">Раздел открывается по коду${b.available ? ` или ${esc(bioLabel())}` : ''}</span></span><input type="checkbox" class="switch" data-priv="enabled" ${on ? 'checked' : ''}></label>
+    </div>
+    <p class="hint">Пока раздел закрыт, его не видно на «Сегодня», в «Статистике» и в чек-ине, а бот пишет без названий. Код хранится только на сервере. Данные в репозитории не шифруются — это защита от чужих глаз на телефоне.</p>
+    ${on ? `
+    ${b.available ? `<div class="card pad">
+      <label class="switch-row"><span>Открывать по ${esc(bioLabel())}</span><input type="checkbox" class="switch" data-priv="bio" ${bioEnabled() ? 'checked' : ''}></label>
+      ${b.requested && !b.granted ? `<p class="hint">Доступ к ${esc(bioLabel())} запрещён в Telegram.</p><button class="btn btn-secondary mt" data-priv="bio-settings">Открыть настройки</button>` : ''}
+    </div>` : ''}
+    <div class="card list-group mt">
+      <button class="row" data-priv="change">${icon.pencil(20)}<span>Сменить код</span></button>
+    </div>
+    <div class="group-title">Блокировать снова</div>
+    <div class="card pad">${segmented('relock', RELOCK_OPTIONS, p.relock || 'now')}</div>
+    <p class="hint">Отсчёт — от ухода с раздела или сворачивания. При закрытии мини-аппа раздел блокируется всегда.</p>` : ''}`;
+}
+
+function mountPrivacy() {
+  const q = (k) => view.querySelector(`[data-priv=${k}]`);
+  const en = q('enabled');
+  if (!en) return;
+  en.onchange = async () => {
+    en.checked = protectedOn(); // переключатель меняется только после подтверждения
+    if (!protectedOn()) {
+      const s = await lockCall('/api/lock/status');
+      if (s.offline) return toast('Нужна сеть: код хранится на сервере');
+      openSetCode({
+        needCurrent: s.hasCode === true,
+        title: 'Код для «Воздержания»',
+        onDone: () => {
+          setSetting('privacy.enabled', true);
+          lockNow(); // включили — раздел сразу закрыт везде
+          toast('Защита включена');
+          offerBio();
+        },
+      });
+    } else {
+      requireAuth('Выключить защиту', async () => {
+        const r = await lockCall('/api/lock/clear');
+        if (!r.ok) return toast(r.error || 'Не получилось — попробуй ещё раз');
+        setSetting('privacy.enabled', false);
+        setBioEnabled(false);
+        toast('Защита выключена');
+      });
+    }
+  };
+  const bioSw = q('bio');
+  if (bioSw) bioSw.onchange = () => (bioSw.checked ? enableBio() : (setBioEnabled(false), render()));
+  const bs = q('bio-settings');
+  if (bs) bs.onclick = () => bioOpenSettings();
+  const ch = q('change');
+  if (ch) ch.onclick = () => openSetCode({ needCurrent: true, title: 'Сменить код', onDone: () => toast('Код изменён') });
+  view.querySelectorAll('[data-seg=relock] button').forEach((b) => (b.onclick = () => setSetting('privacy.relock', b.dataset.value)));
+}
+
+onLockChange((locked) => {
+  resetLockUi();
+  if (locked) closePrivateSheets(state.route === 'abstain'); // шторки раздела (и всё поверх них) закрываются; на самой вкладке — все
+  render();
+});
 
 let firstSyncDone = false;
 sync.onStatus(() => {
@@ -2508,7 +2861,8 @@ async function renderGate() {
   // старая версия хранила токен GitHub в браузере — удаляем его с устройства
   storageRemove('myhabits:sync:v1');
   storageRemove('myhabits:pushkey:v1');
-  const hasLocal = habitsAll().length || abstainAll().length;
+  // при включённой защите «Воздержания» экспорт без входа через Telegram не предлагаем (код проверить нельзя)
+  const hasLocal = (habitsAll().length || abstainAll().length) && !getData().settings.privacy?.enabled;
   renderBlocked(
     'Трекер теперь в Telegram',
     'Открой своего бота в Telegram и нажми «Открыть трекер». Данные подтянутся из твоего приватного репозитория.',
@@ -2903,8 +3257,11 @@ document.addEventListener('click', (e) => {
     case 'hide-namaz':
       storageSet('myhabits:namaz-banner', 'hide');
       return render();
-    case 'add-abstain': return openAbstainEditor();
-    case 'open-abstain': return openAbstainDetail(id);
+    case 'add-abstain': return isLocked() ? (location.hash = '#abstain') : openAbstainEditor();
+    case 'open-abstain': return isLocked() ? (location.hash = '#abstain') : openAbstainDetail(id);
+    case 'lock-bio': return lockTryBio();
+    case 'lock-forgot': return lockForgot();
+    case 'lock-newcode': return openSetCode({ title: 'Новый код', onDone: () => (unlock(), toast('Код задан')) });
     case 'clean-today': e.stopPropagation(); return toggleClean(id);
     case 'relapse': e.stopPropagation(); return relapse(id);
   }
@@ -2925,6 +3282,13 @@ document.addEventListener('change', (e) => {
 let lastDoneState = '';
 function tick() {
   const now = Date.now();
+  checkRelock(now);
+  const lt = document.querySelector('[data-lock-timer]');
+  if (lt) {
+    const w = lockWait();
+    if (w) lt.textContent = fmtWait(w);
+    else render();
+  }
   if (todayKey() !== state.lastTodayKey) {
     // наступил новый день
     if (dkey(state.day) === state.lastTodayKey) state.day = today();
@@ -3000,6 +3364,11 @@ if (!tg.inTelegram()) {
   route();
   recoverDhikr();
   window.Telegram?.WebApp?.onEvent?.('deactivated', commitDhikr);
+  // защита «Воздержания»: свернули — блокировка (сразу или по таймеру); вернулись — проверка таймера
+  window.Telegram?.WebApp?.onEvent?.('deactivated', () => noteLeave());
+  window.Telegram?.WebApp?.onEvent?.('activated', () => checkRelock());
+  document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? noteLeave() : checkRelock()));
+  bioInit().then(() => (state.route === 'profile' || (state.route === 'abstain' && isLocked())) && render());
   sync.initSync();
   if (tg.startScreen() === 'checkin') setTimeout(openCheckin, 300);
 }

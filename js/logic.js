@@ -466,12 +466,12 @@ export function achievements() {
     { emoji: '🗓️', title: 'Идеальная неделя', desc: '7 идеальных дней подряд', ok: bestRun >= 7 },
     { emoji: '💯', title: '100 отметок', desc: 'Выполни привычки 100 раз', ok: total >= 100 },
     { emoji: '🚀', title: '500 отметок', desc: 'Выполни привычки 500 раз', ok: total >= 500 },
-    { emoji: '🛡️', title: 'Первые сутки', desc: 'Сутки без вредной привычки', ok: abBest >= 1 },
-    { emoji: '💪', title: 'Неделя силы воли', desc: '7 дней без срыва', ok: abBest >= 7 },
-    { emoji: '🧠', title: 'Новая норма', desc: '30 дней без срыва', ok: abBest >= 30 },
-    { emoji: '🦁', title: 'Свобода', desc: '100 дней без срыва', ok: abBest >= 100 },
-    { emoji: '👑', title: 'Год свободы', desc: '365 дней без срыва', ok: abBest >= 365 },
-    { emoji: '🍃', title: '50 чистых дней', desc: 'Отметь 50 чистых дней', ok: cleanTotal >= 50 },
+    { abst: true, emoji: '🛡️', title: 'Первые сутки', desc: 'Сутки без вредной привычки', ok: abBest >= 1 },
+    { abst: true, emoji: '💪', title: 'Неделя силы воли', desc: '7 дней без срыва', ok: abBest >= 7 },
+    { abst: true, emoji: '🧠', title: 'Новая норма', desc: '30 дней без срыва', ok: abBest >= 30 },
+    { abst: true, emoji: '🦁', title: 'Свобода', desc: '100 дней без срыва', ok: abBest >= 100 },
+    { abst: true, emoji: '👑', title: 'Год свободы', desc: '365 дней без срыва', ok: abBest >= 365 },
+    { abst: true, emoji: '🍃', title: '50 чистых дней', desc: 'Отметь 50 чистых дней', ok: cleanTotal >= 50 },
   ];
   return { list, total, perfect, bestDays, habitsCount: habitsActive().length };
 }

@@ -208,7 +208,8 @@ export function dueReminders(date, fromMin, toMin) {
     if (left.length || abst.length) {
       const parts = [];
       if (left.length) parts.push(`осталось ${left.length} ${plural(left.length, ['привычка', 'привычки', 'привычек'])}: ${left.slice(0, 3).map((h) => h.name).join(', ')}${left.length > 3 ? '…' : ''}`);
-      if (abst.length) parts.push(`отметь чистый день: ${abst.map((a) => a.name).join(', ')}`);
+      // защищённый раздел: уведомление видно на экране блокировки телефона — без названий
+      if (abst.length) parts.push(settings.privacy?.enabled ? 'отметь день в приложении' : `отметь чистый день: ${abst.map((a) => a.name).join(', ')}`);
       const debt = qadaDebt(date, toMin).total;
       if (debt) parts.push(`долг каза: ${debt}`);
       out.push({ key: `${key}:checkin`, title: '🌙 Вечерний чек-ин', body: parts.join('; ').replace(/^./, (c) => c.toUpperCase()), url: './#checkin' });

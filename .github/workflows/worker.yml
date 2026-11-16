@@ -87,7 +87,7 @@ jobs:
           APP_URL="https://${OWNER_LC}.github.io/${GITHUB_REPOSITORY#*/}/"
           SECRET=$(printf '%s' "$BOT_TOKEN" | sha256sum | cut -c1-40)
           api() { curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/$1" -H 'Content-Type: application/json' -d "$2" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(process.argv[1]+": "+(j.ok?"ok":"ошибка "+j.description));if(!j.ok)process.exitCode=1})' "$1"; }
-          api setWebhook "{\"url\":\"${WORKER_URL}/tg\",\"secret_token\":\"${SECRET}\",\"allowed_updates\":[\"message\"],\"drop_pending_updates\":true}"
+          api setWebhook "{\"url\":\"${WORKER_URL}/tg\",\"secret_token\":\"${SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\"],\"drop_pending_updates\":true}"
           api setChatMenuButton "{\"menu_button\":{\"type\":\"web_app\",\"text\":\"Трекер\",\"web_app\":{\"url\":\"${APP_URL}\"}}}"
           api setMyCommands '{"commands":[]}'
           api setMyDescription '{"description":"Личный трекер привычек и воздержания. Нажми «Трекер» внизу, чтобы открыть приложение."}'
