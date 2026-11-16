@@ -1111,7 +1111,9 @@ select.field.compact { padding-right: 30px; }
 .prayer-row.is-sub b { font-weight: 500; }
 .adj { display: flex; align-items: center; gap: 6px; }
 .adj > span { min-width: 26px; text-align: center; font-size: var(--ios-footnote); color: var(--label-2); font-variant-numeric: tabular-nums; letter-spacing: var(--ios-footnote-ls); }
-.adj .round-btn.sm { width: 28px; height: 28px; }
+.adj .round-btn.sm { width: 28px; height: 28px; position: relative; }
+/* зона нажатия 44×42 (по высоте — шаг строки), круг 28 px — строка не становится выше */
+.adj .round-btn.sm::after { content: ''; position: absolute; inset: -7px -8px; border-radius: 50%; }
 .advanced { margin-top: 12px; }
 .advanced summary { color: var(--accent); font-size: var(--ios-subheadline); cursor: pointer; padding: 4px 0; letter-spacing: var(--ios-subheadline-ls); }
 

@@ -1936,7 +1936,7 @@ function prayerSection() {
       <a class="city-line" href="#profile/city"><span>📍 ${esc(p.city || 'Свои координаты')} · ${esc(MADHAB_LABEL[p.asr] || MADHAB_LABEL.hanafi)}</span><span class="muted">Изменить ${icon.chevronR(14)}</span></a>
       ${prayerSourceBadge(st)}
       <div class="prayer-table">${rows}</div>
-      <p class="hint">Сегодня, ${esc(p.city || '')}. Кнопки ± сдвигают время на минуту. Точнее — через «Сверку с расписанием» ниже (muslim.uz или расписание мечети).</p>
+      <p class="hint">± — поправка на минуту. Точнее — «Сверка с расписанием» ниже.</p>
       ${calibrationBlock(st)}
       <details class="advanced"><summary>Метод расчёта</summary>
         <div class="form-grid">
