@@ -817,7 +817,7 @@ function stageEditor(h, day) {
       ontime: `${kindLabel}отмечено в ${at}`,
       late: `${kindLabel}вовремя, отмечено в ${at}`,
       qada: `каза · восполнено в ${at}`,
-      missed: `не отмечено (${window_}) · долг, можно восполнить`,
+      missed: `${window_} · пропущен, в долг`,
     }[status] || (ok && at ? `отмечено в ${at}` : window_);
     const range = s.max && s.max !== s.min ? `${s.min}–${s.max}` : `${s.min}`;
     const control = h.type === 'count'
