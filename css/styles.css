@@ -1266,9 +1266,9 @@ body.is-gate .tabbar { display: none; }
 .dhikr-item-count { margin-top: 8px; font-size: var(--ios-subheadline); font-variant-numeric: tabular-nums; letter-spacing: var(--ios-subheadline-ls); }
 .dhikr-item-count span { color: var(--label-2); }
 .dhikr-item-count.is-done { color: var(--green); font-weight: 600; }
-.dhikr-star { font-size: 20px; line-height: 1; color: var(--label-3); padding: 2px 4px; }
+/* в списке: значок 20 px, нажатие ловится в 44×44 (отрицательные поля не раздвигают строку) */
+.dhikr-star:not(.icon-btn) { display: inline-grid; place-items: center; width: 44px; height: 44px; margin: -12px -12px -12px -6px; color: var(--label-3); flex: none; }
 .dhikr-star.is-on { color: var(--orange); }
-.dhikr-head-right .dhikr-star { font-size: 22px; }
 .dhikr-dots { display: flex; justify-content: center; gap: 6px; margin-top: -4px; }
 .dhikr-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--label-3); }
 .dhikr-dots i.is-on { background: var(--label); }

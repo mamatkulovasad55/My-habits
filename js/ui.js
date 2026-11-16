@@ -41,6 +41,7 @@ export const icon = {
   // плитки зикров: заливка currentColor, как глифы в кругах «Напоминаний» iOS
   beads: (s) => `<svg width="${s || 24}" height="${s || 24}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => { const a = (i / 12) * Math.PI * 2 + Math.PI / 2; return `<circle cx="${(12 + 7.2 * Math.cos(a)).toFixed(2)}" cy="${(10 + 7.2 * Math.sin(a)).toFixed(2)}" r="1.55"/>`; }).join('')}<circle cx="12" cy="18.2" r="1.3"/><path d="M11.2 19.3h1.6l1.2 3.7h-4z"/></svg>`,
   star: (s) => `<svg width="${s || 24}" height="${s || 24}" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8l2.7 5.8 6.3.7-4.7 4.3 1.3 6.2L12 16.6l-5.6 3.2 1.3-6.2L3 9.3l6.3-.7z"/></svg>`,
+  starO: (s) => svg('<path d="M12 3.6l2.5 5.3 5.8.6-4.3 4 1.2 5.7L12 16.3l-5.2 2.9L8 13.5l-4.3-4 5.8-.6z"/>', s, 1.8),
   sun: (s) => svg('<circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>', s, 2.2),
   moon: (s) => `<svg width="${s || 24}" height="${s || 24}" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 14.6A8.5 8.5 0 0 1 9.4 4a8.5 8.5 0 1 0 10.6 10.6z"/></svg>`,
   flame: (s) => svg('<path d="M12 21c-3.9 0-6.5-2.6-6.5-6.2 0-3.4 2.4-5.4 3.6-8.3.4 2 1.6 3.3 2.9 3.8C12.5 7 13.5 4.5 15.5 3c-.2 3.2 3 5.8 3 10.8 0 4.2-2.7 7.2-6.5 7.2z"/>', s),

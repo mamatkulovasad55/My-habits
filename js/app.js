@@ -3062,7 +3062,12 @@ function toggleFav(id) {
   setSetting('dhikr.favorites', [...fav]);
   haptic(10);
 }
-const starBtn = (id) => `<button class="dhikr-star ${isFav(id) ? 'is-on' : ''}" data-fav="${id}" aria-label="${isFav(id) ? 'Убрать из избранного' : 'В избранное'}">${isFav(id) ? '★' : '☆'}</button>`;
+/** Звезда «в избранное»: в шапке — круглая кнопка как соседние, в списке — значок с зоной нажатия 44×44. */
+const starBtn = (id, { round = false } = {}) => {
+  const on = isFav(id);
+  const sz = round ? 17 : 20;
+  return `<button class="dhikr-star ${round ? 'icon-btn sm' : ''} ${on ? 'is-on' : ''}" data-fav="${id}" aria-label="${on ? 'Убрать из избранного' : 'В избранное'}">${on ? icon.star(sz) : icon.starO(sz)}</button>`;
+};
 
 /** 1. Главный экран: разделы и «Сегодня». */
 async function openDhikr() {
@@ -3179,7 +3184,7 @@ function openDhikrCounter(items, index) {
       const d = cur();
       const target = tgt();
       const dots = items.length > 1 ? `<div class="dhikr-dots">${items.map((_, i) => `<i class="${i === idx ? 'is-on' : ''}"></i>`).join('')}</div>` : '';
-      return `${dhikrHead(`${idx + 1} / ${items.length}`, { right: `${starBtn(d.id)}<button class="icon-btn sm" data-z="menu" aria-label="Настройки">•••</button>` })}
+      return `${dhikrHead(`${idx + 1} / ${items.length}`, { right: `${starBtn(d.id, { round: true })}<button class="icon-btn sm" data-z="menu" aria-label="Настройки">•••</button>` })}
       <div class="dhikr-body">
         ${dots}
         <div class="dhikr-text ${slide}" data-z="text">
