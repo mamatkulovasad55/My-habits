@@ -6,7 +6,7 @@ import {
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
-import { ACH_GROUPS, ACH_BADGES, badgeById, groupOf, computeAchievements, earnedFromData } from './achievements.js';
+import { ACH_GROUPS, ACH_CATALOG, ACH_BADGES, badgeById, groupOf, computeAchievements, earnedFromData } from './achievements.js';
 import { protectedOn, isLocked, unlock, lockNow, noteLeave, noteReturn, checkRelock, onLockChange, bioInit, bio, bioLabel, bioEnabled, setBioEnabled, bioRequestAccess, bioAuthenticate, bioOpenSettings } from './lock.js';
 import { storage, storageGet, storageSet, storageRemove, storageFailed, onStorageStatus } from './storage.js';
 import * as tg from './tg.js';
@@ -1936,7 +1936,7 @@ function prayerSection() {
       <a class="city-line" href="#profile/city"><span>📍 ${esc(p.city || 'Свои координаты')} · ${esc(MADHAB_LABEL[p.asr] || MADHAB_LABEL.hanafi)}</span><span class="muted">Изменить ${icon.chevronR(14)}</span></a>
       ${prayerSourceBadge(st)}
       <div class="prayer-table">${rows}</div>
-      <p class="hint">Сегодня, ${esc(p.city || '')}. Кнопки ± сдвигают время на минуту. Точнее — через «Сверку с расписанием» ниже (muslim.uz или расписание мечети).</p>
+      <p class="hint">± — поправка на минуту. Точнее — «Сверка с расписанием» ниже.</p>
       ${calibrationBlock(st)}
       <details class="advanced"><summary>Метод расчёта</summary>
         <div class="form-grid">
@@ -2819,23 +2819,32 @@ function achProgress() {
 function achievementsSection() {
   const have = new Map(getData().achievements.map((x) => [x.id, x]));
   const prog = achProgress();
+  // одна строка на достижение: ступени (7 · 30 · 100) внутри, прогресс — до следующей ступени
   return ACH_GROUPS.filter((g) => !(g.private && isLocked()))
     .map((g) => {
-      const items = ACH_BADGES.filter((b) => b.group === g.id);
+      const items = ACH_CATALOG.filter((c) => c.group === g.id);
       if (!items.length) return '';
       return `<div class="group-title">${esc(g.title)}</div>
-        <div class="ach-grid">${items
-          .map((b) => {
-            const rec = have.get(b.badgeId);
-            const cur = Math.min(b.level, prog[b.id]?.current || 0);
-            const unit = plural(b.level, b.unitForms);
-            return `<div class="ach ${rec ? 'is-ok' : ''}">
-              <div class="ach-emoji">${b.icon}</div>
-              <b>${esc(b.title)} · ${b.level}</b>
-              <span>${b.level} ${esc(unit)} ${esc(b.hint.replace(/^\S+\s/, ''))}</span>
-              ${rec
-                ? `<span class="ach-date">✓ ${esc(fmtEarned(rec.earnedAt))}</span>`
-                : `<div class="ach-progress"><div class="progress"><div style="width:${Math.round((cur / b.level) * 100)}%"></div></div><span>${cur} / ${b.level} ${esc(unit)}</span></div>`}
+        <div class="card ach-list">${items
+          .map((c) => {
+            const recs = c.levels.map((L) => have.get(`${c.id}-${L}`));
+            const got = recs.filter(Boolean).length;
+            const next = c.levels.find((L, i) => !recs[i]);
+            const cur = prog[c.id]?.current || 0;
+            const last = recs.filter(Boolean).sort((a, b) => (a.earnedAt < b.earnedAt ? 1 : -1))[0];
+            const steps = c.levels
+              .map((L, i) => `<span class="ach-step ${recs[i] ? 'is-ok' : L === next ? 'is-next' : ''}">${recs[i] ? icon.check(12) : ''}${L}</span>`)
+              .join('');
+            const foot = next
+              ? `<div class="ach-progress"><div class="progress"><div style="width:${Math.round((Math.min(cur, next) / next) * 100)}%"></div></div><span>${Math.min(cur, next)} / ${next} ${esc(plural(next, c.unitForms))}${last ? ` · получено ${esc(fmtEarned(last.earnedAt))}` : ''}</span></div>`
+              : `<span class="ach-date">${icon.check(12)} Все ступени · ${esc(fmtEarned(last.earnedAt))}</span>`;
+            return `<div class="ach-row ${got ? 'is-ok' : ''}">
+              <div class="ach-emoji">${c.icon}</div>
+              <div class="ach-main">
+                <div class="ach-head"><b>${esc(c.title)}</b><span class="ach-steps">${steps}</span></div>
+                <span class="ach-hint">${esc(c.hint[0].toUpperCase() + c.hint.slice(1))}</span>
+                ${foot}
+              </div>
             </div>`;
           })
           .join('')}</div>`;
@@ -3053,7 +3062,12 @@ function toggleFav(id) {
   setSetting('dhikr.favorites', [...fav]);
   haptic(10);
 }
-const starBtn = (id) => `<button class="dhikr-star ${isFav(id) ? 'is-on' : ''}" data-fav="${id}" aria-label="${isFav(id) ? 'Убрать из избранного' : 'В избранное'}">${isFav(id) ? '★' : '☆'}</button>`;
+/** Звезда «в избранное»: в шапке — круглая кнопка как соседние, в списке — значок с зоной нажатия 44×44. */
+const starBtn = (id, { round = false } = {}) => {
+  const on = isFav(id);
+  const sz = round ? 17 : 20;
+  return `<button class="dhikr-star ${round ? 'icon-btn sm' : ''} ${on ? 'is-on' : ''}" data-fav="${id}" aria-label="${on ? 'Убрать из избранного' : 'В избранное'}">${on ? icon.star(sz) : icon.starO(sz)}</button>`;
+};
 
 /** 1. Главный экран: разделы и «Сегодня». */
 async function openDhikr() {
@@ -3170,7 +3184,7 @@ function openDhikrCounter(items, index) {
       const d = cur();
       const target = tgt();
       const dots = items.length > 1 ? `<div class="dhikr-dots">${items.map((_, i) => `<i class="${i === idx ? 'is-on' : ''}"></i>`).join('')}</div>` : '';
-      return `${dhikrHead(`${idx + 1} / ${items.length}`, { right: `${starBtn(d.id)}<button class="icon-btn sm" data-z="menu" aria-label="Настройки">•••</button>` })}
+      return `${dhikrHead(`${idx + 1} / ${items.length}`, { right: `${starBtn(d.id, { round: true })}<button class="icon-btn sm" data-z="menu" aria-label="Настройки">•••</button>` })}
       <div class="dhikr-body">
         ${dots}
         <div class="dhikr-text ${slide}" data-z="text">
