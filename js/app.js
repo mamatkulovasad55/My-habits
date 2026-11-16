@@ -2185,9 +2185,9 @@ function qadaSettingsSection() {
         <button class="btn btn-secondary" id="qada-calc">Посчитать</button>
       </div>
       <div class="qada-grid">${QADA_KEYS.map((k) => `<label><span>${QADA_NAMES[k]}</span><input class="field" type="number" min="0" inputmode="numeric" data-set="qada.old.${k}" data-num value="${Number(q.old?.[k]) || 0}"></label>`).join('')}</div>
-      <label class="switch-row mt"><span>Цель: восполнять в день</span>
+      <label class="switch-row mt"><span>Цель в день</span>
         <select class="field compact" data-set="qada.perDay" data-num>${[0, 1, 2, 3, 4, 5, 6, 10].map((n) => `<option value="${n}" ${Number(q.perDay) === n ? 'selected' : ''}>${n ? `${n} ${plural(n, ['намаз', 'намаза', 'намазов'])}` : 'без цели'}</option>`).join('')}</select></label>
-      <p class="hint">Калькулятор считает по одному намазу каждого вида за каждый день, включая Витр (ваджиб), дальше любое число можно поправить. Осталось восполнить из старого долга: <b>${d.oldLeft}</b>.</p>
+      <p class="hint">По одному намазу каждого вида за день, включая Витр (ваджиб); числа можно поправить. Осталось из старого долга: <b>${d.oldLeft}</b>.</p>
     </div>
     <div class="group-title">Запретное время</div>
     <div class="card pad">
