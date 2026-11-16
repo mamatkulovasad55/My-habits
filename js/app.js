@@ -6,6 +6,7 @@ import {
   upsertHabit, upsertAbstain, removeHabit, removeAbstain, setSetting, onLocalChange,
 } from './store.js';
 import * as sync from './sync.js';
+import { importSummary, withBackup, lastBackupText, resetProgressNow } from './backup.js';
 import { ACH_GROUPS, ACH_CATALOG, ACH_BADGES, badgeById, groupOf, computeAchievements, earnedFromData } from './achievements.js';
 import { protectedOn, isLocked, unlock, lockNow, noteLeave, noteReturn, checkRelock, onLockChange, bioInit, bio, bioLabel, bioEnabled, setBioEnabled, bioRequestAccess, bioAuthenticate, bioOpenSettings } from './lock.js';
 import { storage, storageGet, storageSet, storageRemove, storageFailed, onStorageStatus } from './storage.js';
@@ -1879,6 +1880,9 @@ function archiveSection() {
 }
 
 function dataSection() {
+  const d = getData();
+  const locked = protectedOn();
+  const weekly = d.settings.backup?.weekly !== false;
   return `<div class="card pad">
       <div class="sync-status" id="sync-status">${syncStatusHTML()}</div>
       <button class="btn btn-secondary btn-block mt" data-s="now">${icon.cloud(17)} Синхронизировать сейчас</button>
@@ -1887,10 +1891,14 @@ function dataSection() {
     <div class="group-title">Резервная копия</div>
     <div class="card list-group">
       <button class="row" data-s="backup">${icon.cloud(20)}<span>Прислать бэкап в бота</span></button>
+      <label class="row static switch-row ${locked ? 'is-off' : ''}">${icon.calendar(20)}<span class="row-main"><span>Еженедельный бэкап</span><span class="muted">${locked ? 'Не отправляется, пока включена защита «Детокса»' : 'в бота по воскресеньям в 21:00'}</span></span><input type="checkbox" class="switch" data-set-bool="backup.weekly" ${weekly && !locked ? 'checked' : ''} ${locked ? 'disabled' : ''}></label>
       <button class="row" data-s="export">${icon.archive(20)}<span>Экспорт в JSON</span></button>
       <label class="row">${icon.undo(20)}<span>Импорт из JSON</span><input type="file" accept="application/json,.json" data-s="import" hidden></label>
     </div>
-    <div class="card list-group mt">
+    <p class="hint" data-s="last-backup">${esc(lastBackupText(d.backupLog))}</p>
+    <div class="group-title danger-title">Опасная зона</div>
+    <div class="card list-group">
+      <button class="row is-danger" data-s="reset">${icon.undo(20)}<span>Сбросить прогресс</span></button>
       <button class="row is-danger" data-s="wipe">${icon.trash(20)}<span>Удалить все данные</span></button>
     </div>`;
 }
@@ -2337,33 +2345,143 @@ function mountProfile() {
   q('backup').onclick = (e) => requireAuth('Прислать бэкап', () => sendBackupNow(e.currentTarget));
   q('export').onclick = () => requireAuth('Экспорт в JSON', exportJSON);
   q('import').onchange = async (e) => {
-
     const file = e.target.files[0];
-    if (!file) return;
-    try {
-      const imported = JSON.parse(await file.text());
-      if (!imported || !Array.isArray(imported.habits)) throw new Error();
-      replaceData(merge(getData(), prepareImport(getData(), imported)), { notifySync: true });
-      toast('Данные импортированы');
-    } catch {
-      toast('Не удалось прочитать файл');
-    }
     e.target.value = '';
+    if (!file) return;
+    let text = '';
+    try {
+      text = await file.text();
+    } catch {
+      return toast('Не удалось прочитать файл');
+    }
+    const sum = importSummary(text);
+    if (!sum.ok) return confirmSheet({ title: 'Файл не подходит', message: `${esc(sum.error)}. Данные не изменены.`, confirm: 'Понятно' });
+    openImportPreview(sum);
   };
-  q('wipe').onclick = () =>
-    confirmSheet({
-      title: 'Удалить все данные?',
-      message: 'Привычки, детокс, вся история, зикры, заметки, ниййа и достижения будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
-      confirm: 'Удалить всё',
-      destructive: true,
-      onConfirm: () => {
-        const debt = qadaDebt().byPrayer;
-        resetAll(Object.fromEntries(QADA_KEYS.map((k) => [k, debt[k].oldLeft])));
-        updateLocal((l) => (l.timers = {}));
-        storageRemove(DHIKR_PENDING_KEY);
-        toast('Все данные удалены');
-      },
-    });
+  q('reset').onclick = () => openDangerSheet(DANGER.reset);
+  q('wipe').onclick = () => openDangerSheet(DANGER.wipe);
+}
+
+// ---------- Опасные действия: подтверждение, автобэкап ----------
+
+const DANGER = {
+  reset: {
+    reason: 'reset',
+    title: 'Сбросить прогресс?',
+    word: 'СБРОС',
+    confirm: 'Сбросить прогресс',
+    gone: 'все отметки и зикры, заметки, достижения, история восполнения каза, попытки и чистые дни детокса',
+    kept: 'привычки с этапами, расписаниями и напоминаниями, детоксы (отсчёт — с этой минуты), архив, настройки, ниййа. Долг каза переносится в остаток числом, новые пропуски считаются с завтрашнего дня',
+    run: () => {
+      resetProgressNow();
+      updateLocal((l) => (l.timers = {}));
+      storageRemove(DHIKR_PENDING_KEY);
+      toast('Прогресс сброшен');
+    },
+  },
+  wipe: {
+    reason: 'wipe',
+    title: 'Удалить все данные?',
+    word: 'УДАЛИТЬ',
+    confirm: 'Удалить всё',
+    gone: 'привычки, детоксы, вся история, зикры, заметки, ниййа и достижения — в том числе в репозитории',
+    kept: 'настройки (город, время намаза, остаток старого долга каза)',
+    run: () => {
+      const debt = qadaDebt().byPrayer;
+      resetAll(Object.fromEntries(QADA_KEYS.map((k) => [k, debt[k].oldLeft])));
+      updateLocal((l) => (l.timers = {}));
+      storageRemove(DHIKR_PENDING_KEY);
+      toast('Все данные удалены');
+    },
+  },
+};
+
+/** Шторка «удалится / останется». Без защиты — ввод слова; с защитой «Детокса» — код или Face ID. */
+function openDangerSheet(a) {
+  const locked = protectedOn();
+  confirmSheet({
+    title: a.title,
+    message: `<span class="danger-list"><b>Удалится:</b> ${esc(a.gone)}.<br><b>Останется:</b> ${esc(a.kept)}.<br>Перед этим бэкап придёт в бота.</span>`,
+    extra: locked ? '' : `<label class="danger-word"><span>Чтобы подтвердить, введи <b>${a.word}</b></span><input class="field" data-word autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done"></label>`,
+    confirm: a.confirm,
+    destructive: true,
+    mount: (el) => {
+      if (locked) return;
+      const inp = el.querySelector('[data-word]');
+      const ok = el.querySelector('[data-c=ok]');
+      const check = () => (ok.disabled = inp.value.trim().toUpperCase() !== a.word);
+      inp.oninput = check;
+      check();
+    },
+    onConfirm: (el) => {
+      if (!locked && el.querySelector('[data-word]').value.trim().toUpperCase() !== a.word) return false;
+      setTimeout(() => requireAuth(a.confirm, () => guarded(a.reason, a.run)), 0);
+    },
+  });
+}
+
+const REASON_TEXT = { reset: 'сбросом прогресса', wipe: 'удалением', import: 'импортом' };
+
+/** Бэкап в бота (с подписью reason), затем действие. Не ушёл — «Скачать экспорт и продолжить» или «Отмена». */
+function guarded(reason, run) {
+  return withBackup({
+    backup: async () => {
+      if (navigator.onLine === false) throw new Error('Нет сети');
+      toast('Отправляю бэкап в бота…', { ms: 8000 });
+      const r = await sync.api('/api/backup', { reason, data: getData() });
+      // старый сервер игнорирует данные и причину (нет at) — такой бэкап не считаем
+      if (!r?.ok || !r.at) throw new Error('Сервер ещё не обновлён — бэкап с подписью не отправлен');
+      noteBackup('bot', r.at);
+    },
+    fallback: (err) => new Promise((resolve) => {
+      document.querySelector('.toast')?.classList.remove('is-shown'); // «Отправляю бэкап…» не закрывает кнопки
+      let choice = '';
+      confirmSheet({
+        title: 'Бэкап не отправлен',
+        message: `${esc(err?.message || 'Ошибка сервера')}. Без бэкапа действие не выполняется: можно скачать экспорт и продолжить.`,
+        confirm: 'Скачать экспорт и продолжить',
+        onConfirm: () => {
+          choice = 'export';
+        },
+        onClose: () => resolve(choice),
+      });
+    }),
+    exportFile: exportJSON,
+    run,
+  }).then((done) => {
+    if (!done) toast('Отменено — данные не изменены');
+  }, (err) => toast(err?.message || `Не удалось выполнить действие перед ${REASON_TEXT[reason]}`));
+}
+
+/** Превью файла бэкапа перед импортом. */
+function openImportPreview(sum) {
+  const day = (k) => (k ? fmtDateShort(parseKey(k)) : '');
+  const rows = [
+    ['Дата файла', sum.at ? fmtDateTime(new Date(sum.at)) : 'не указана'],
+    ['Версия схемы', String(sum.schema)],
+    ['Привычки', String(sum.habits)],
+    ['Детоксы', String(sum.abstain)],
+    ['История', sum.from ? `${day(sum.from)} — ${day(sum.to)}` : 'нет отметок'],
+    ['Достижения', String(sum.achievements)],
+  ];
+  confirmSheet({
+    title: 'Импортировать бэкап?',
+    message: 'Данные из файла объединятся с текущими. Перед этим текущие данные уйдут бэкапом в бота.',
+    extra: `<div class="card list-group import-preview">${rows.map(([k, v]) => `<div class="row static"><span class="row-main"><span>${esc(k)}</span></span><span class="muted">${esc(v)}</span></div>`).join('')}</div>`,
+    confirm: 'Импортировать',
+    onConfirm: () => {
+      setTimeout(() => requireAuth('Импорт из JSON', () => guarded('import', () => {
+        replaceData(merge(getData(), prepareImport(getData(), sum.data)), { notifySync: true });
+        toast('Данные импортированы');
+      })), 0);
+    },
+  });
+}
+
+/** Отметить бэкап в data.backupLog (виден на всех устройствах). */
+function noteBackup(kind, at = Date.now()) {
+  at = Number(at) || Date.now();
+  update((d) => (d.backupLog = { ...(d.backupLog || {}), [kind]: Math.max(at, Number(d.backupLog?.[kind]) || 0) }));
 }
 
 // ============================================================
@@ -2428,6 +2546,7 @@ async function sendBackupNow(b) {
   try {
     await sync.syncNow();
     const r = await sync.api('/api/backup', {});
+    noteBackup('bot', r?.at);
     toast(`Бэкап отправлен в бота · ${r.events} ${plural(r.events, ['событие', 'события', 'событий'])}`);
   } catch (err) {
     toast(err.message || 'Не удалось отправить бэкап');
@@ -2442,6 +2561,7 @@ function exportJSON() {
   a.href = URL.createObjectURL(blob);
   a.download = `my-habits-${todayKey()}.json`;
   a.click();
+  noteBackup('export');
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 

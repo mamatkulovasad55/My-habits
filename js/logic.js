@@ -52,6 +52,11 @@ export function firstDay(h) {
 function computeFirstDay(h) {
   let first = startOfDay(new Date(h.createdAt || Date.now()));
   const logs = getData().logs[h.id] || {};
+  // «Сбросить прогресс»: дни до сброса — «нет данных», а не пропуски. Если история восстановлена из бэкапа
+  // (события с пометкой r) — считаем, как до сброса.
+  const resetAt = getData().resetAt || 0;
+  const restored = resetAt && Object.values(logs).some((e) => Array.isArray(e?.ev) && e.ev.some((x) => x.r));
+  if (resetAt && !restored && startOfDay(new Date(resetAt)) > first) first = startOfDay(new Date(resetAt));
   for (const k of Object.keys(logs)) {
     if ((logs[k].v || 0) > 0) {
       const d = parseKey(k);

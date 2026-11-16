@@ -291,9 +291,10 @@ document.addEventListener('keydown', (e) => {
 });
 
 /** Диалог подтверждения в стиле iOS action sheet. */
-export function confirmSheet({ title, message = '', confirm = 'Подтвердить', destructive = false, extra = '', onConfirm }) {
+export function confirmSheet({ title, message = '', confirm = 'Подтвердить', destructive = false, extra = '', onConfirm, mount, onClose }) {
   const s = openSheet({
     className: 'sheet-compact',
+    onClose,
     render: () => `
       <div class="sheet-body">
         <div class="confirm">
@@ -309,6 +310,7 @@ export function confirmSheet({ title, message = '', confirm = 'Подтверд�
       api.el.querySelector('[data-c=ok]').onclick = () => {
         if (onConfirm?.(api.el) !== false) api.close();
       };
+      mount?.(api.el);
     },
   });
   return s;

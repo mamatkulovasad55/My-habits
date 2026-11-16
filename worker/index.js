@@ -148,12 +148,20 @@ async function api(req, env, path) {
   }
   if (path.startsWith('/api/lock/')) return lockApi(env, path, body, owner);
   if (path === '/api/backup') {
+    // reason — автобэкап перед опасным действием (подпись в боте); data — текущие данные устройства:
+    // сначала сливаются с репозиторием, в бэкап идёт результат (даже если обычная синхронизация не прошла)
+    const reason = !body.reason ? '' : Object.hasOwn(BACKUP_REASONS, body.reason) ? BACKUP_REASONS[body.reason] : undefined;
+    if (reason === undefined) return json({ error: 'Неизвестная причина бэкапа' }, 400);
     try {
-      const remote = await getRemoteRaw(env);
-      if (!remote) return json({ error: 'Данных пока нет' }, 404);
-      const r = await sendBackup(env, owner, remote.data);
+      let data;
+      if (body.data && typeof body.data === 'object') data = await syncData(env, body.data);
+      else data = (await getRemoteRaw(env))?.data;
+      if (!data) return json({ error: 'Данных пока нет' }, 404);
+      const r = await sendBackup(env, owner, data, undefined, reason);
       if (!r.ok) return json({ error: 'Telegram не принял файл, попробуй позже' }, 502);
-      return json({ ok: true, events: r.events });
+      const at = Date.now();
+      await noteBackup(env, 'bot', at);
+      return json({ ok: true, events: r.events, at });
     } catch (e) {
       return json({ error: e.message }, 502);
     }
@@ -346,15 +354,28 @@ function countEvents(data) {
   return n;
 }
 
-/** Прислать data.json владельцу документом. date — местная дата для имени и подписи. */
-async function sendBackup(env, owner, data, date = localNow(effectiveTz(data?.settings)).date) {
+/** Подписи автобэкапа перед опасным действием (другие причины сервер не принимает). */
+const BACKUP_REASONS = { reset: 'Перед сбросом прогресса', wipe: 'Перед удалением', import: 'Перед импортом' };
+
+/** Записать время бэкапа в данные (data.backupLog), чтобы его видели все устройства. Ошибка не мешает бэкапу. */
+async function noteBackup(env, kind, at) {
+  try {
+    const remote = await getRemoteRaw(env);
+    if (remote) await syncData(env, { ...remote.data, backupLog: { ...(remote.data.backupLog || {}), [kind]: at } });
+  } catch (e) {
+    console.error('backupLog', e?.message);
+  }
+}
+
+/** Прислать data.json владельцу документом. date — местная дата для имени и подписи, reason — подпись автобэкапа. */
+async function sendBackup(env, owner, data, date = localNow(effectiveTz(data?.settings)).date, reason = '') {
   const events = countEvents(data);
   const day = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`;
   let ok = false;
   try {
     const r = await tgDocument(env.BOT_TOKEN, {
       chat_id: Number(owner),
-      caption: `Бэкап · ${day} · ${events.toLocaleString('ru-RU')} ${plural(events, ['событие', 'события', 'событий'])}`,
+      caption: `${reason ? `${reason} · ` : ''}Бэкап · ${day} · ${events.toLocaleString('ru-RU')} ${plural(events, ['событие', 'события', 'событий'])}`,
       filename: `data-${dkey(date)}.json`,
       content: stableStringify(data, 1) + '\n',
     });
@@ -432,8 +453,10 @@ async function tickUser(env, user) {
   // вчерашний день: хвост через полночь и этапы, чьё время длится до утра (утренний повтор про Ишу)
   if (min < 720) due.push(...dueReminders(addDays(date, -1), 1440 + min - 3, 1440 + min));
   // еженедельный бэкап: воскресенье с 21:00 до конца дня (догоняет, если cron пропустил минуту)
-  // при включённой защите «Воздержания» файл с данными в чат автоматически не отправляется (его нельзя закрыть кодом)
-  const backupDay = date.getDay() === BACKUP_WEEKDAY && min >= BACKUP_AT && !remote.data.settings?.privacy?.enabled ? dkey(date) : '';
+  // при включённой защите «Детокса» файл с данными в чат автоматически не отправляется (его нельзя закрыть кодом);
+  // выключенный в «Профиле → Данные» еженедельный бэкап — тоже
+  const weeklyOn = st?.backup?.weekly !== false && !st?.privacy?.enabled;
+  const backupDay = date.getDay() === BACKUP_WEEKDAY && min >= BACKUP_AT && weeklyOn ? dkey(date) : '';
   if (!due.length && !backupDay) return;
   const state = await loadState(env, dkey(date));
   const fresh = due.filter((r) => !state.has(r.key));
@@ -459,6 +482,8 @@ async function tickUser(env, user) {
     }
   }
   if (changed) await saveState(env, state, owner);
+  // время бэкапа — в данные (после записи состояния: зависший GitHub не должен привести к повторной отправке)
+  if (state.backup === backupDay && needBackup) await noteBackup(env, 'weekly', Date.now());
 }
 
 async function runTick(env) {
