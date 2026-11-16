@@ -2486,7 +2486,7 @@ function mountPinPad(root, st, onFull) {
 
 // ---------- Экран блокировки на вкладке ----------
 
-const lockUi = { pin: '', err: '', until: 0, hasCode: null, busy: false, autoTried: false, loading: false };
+const lockUi = { pin: '', err: '', until: 0, hasCode: null, busy: false, autoTried: false, loading: false, waitReset: 0, lastPoll: 0 };
 const lockWait = () => Math.max(0, Math.ceil((lockUi.until - Date.now()) / 1000));
 lockUi.wait = lockWait;
 
@@ -2515,7 +2515,7 @@ function lockScreen() {
     <div class="lock-icon">🔒</div><h2>Раздел защищён</h2>
     <p class="lock-msg ${lockUi.err ? 'is-err' : ''}" data-lock-msg>${lockMessage()}</p>
     ${pinPadHTML(lockUi.pin, bioEnabled() ? 'data-action="lock-bio"' : '')}
-    <button class="link-btn small lock-forgot" data-action="lock-forgot">Забыл код</button>
+    ${lockUi.waitReset > Date.now() ? '<p class="hint center">Нажми «Сбросить код» в чате с ботом — экран обновится сам</p>' : '<button class="link-btn small lock-forgot" data-action="lock-forgot">Забыл код</button>'}
   </div>`;
 }
 
@@ -2525,10 +2525,14 @@ async function lockStatus() {
   const r = await lockCall('/api/lock/status');
   lockUi.loading = false;
   if (r.hasCode === undefined) return;
+  const changed = lockUi.hasCode !== r.hasCode || (r.retryIn && !lockWait());
   lockUi.hasCode = r.hasCode;
-  if (!r.hasCode) setBioEnabled(false); // код сброшен через бота — биометрия тоже
+  if (!r.hasCode) {
+    setBioEnabled(false); // код сброшен через бота — биометрия тоже
+    lockUi.waitReset = 0;
+  }
   if (r.retryIn) lockUi.until = Date.now() + r.retryIn * 1000;
-  if (state.route === 'abstain' && isLocked()) render();
+  if (changed && state.route === 'abstain' && isLocked()) render(); // перерисовка только при изменении — ввод не сбивается
 }
 
 function lockTryBio() {
@@ -2571,6 +2575,10 @@ function lockForgot() {
     onConfirm: async () => {
       const r = await lockCall('/api/lock/forgot');
       if (r.ok && r.hasCode === false) return (lockUi.hasCode = false), render();
+      if (r.ok) {
+        lockUi.waitReset = Date.now() + 120e3; // 2 минуты экран сам проверяет, нажата ли кнопка в чате
+        render();
+      }
       toast(r.ok ? (r.sent === false ? r.error : 'Сообщение отправлено — открой чат с ботом') : r.error || 'Не получилось');
     },
   });
@@ -3283,6 +3291,11 @@ let lastDoneState = '';
 function tick() {
   const now = Date.now();
   checkRelock(now);
+  // после «Забыл код»: каждые 3 с спрашиваем сервер, не нажата ли «Сбросить код» в чате
+  if (state.route === 'abstain' && isLocked() && lockUi.waitReset > now && now - lockUi.lastPoll >= 3000) {
+    lockUi.lastPoll = now;
+    lockStatus();
+  }
   const lt = document.querySelector('[data-lock-timer]');
   if (lt) {
     const w = lockWait();
@@ -3366,8 +3379,13 @@ if (!tg.inTelegram()) {
   window.Telegram?.WebApp?.onEvent?.('deactivated', commitDhikr);
   // защита «Воздержания»: свернули — блокировка (сразу или по таймеру); вернулись — проверка таймера
   window.Telegram?.WebApp?.onEvent?.('deactivated', () => noteLeave());
-  window.Telegram?.WebApp?.onEvent?.('activated', () => checkRelock());
-  document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? noteLeave() : checkRelock()));
+  // вернулись в приложение (например, из чата с ботом после «Сбросить код») — сразу перепроверить статус кода
+  const onBack = () => {
+    checkRelock();
+    if (state.route === 'abstain' && isLocked()) lockStatus();
+  };
+  window.Telegram?.WebApp?.onEvent?.('activated', onBack);
+  document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? noteLeave() : onBack()));
   bioInit().then(() => (state.route === 'profile' || (state.route === 'abstain' && isLocked())) && render());
   sync.initSync();
   if (tg.startScreen() === 'checkin') setTimeout(openCheckin, 300);

@@ -1,8 +1,8 @@
 // Код раздела «Воздержание»: сервер хранит только хеш, лимит попыток на сервере, сброс через бота.
 import assert from 'node:assert/strict';
-import { setNow, memoryKV, fakeNet, runCron, tashkent } from './helpers.mjs';
+import { setNow, memoryKV, fakeNet, runCron, tashkent, memoryDO } from './helpers.mjs';
 import { typicalData } from './fixtures.mjs';
-import { LOCK_KEY, afterFail, retryIn } from '../worker/lock.js';
+import { LOCK_KEY, afterFail, retryIn, LockStore, makeRecord } from '../worker/lock.js';
 
 const worker = (await import('../worker/index.js')).default;
 const net = fakeNet();
@@ -29,6 +29,8 @@ setNow(T);
 const KV = memoryKV();
 KV.map.set('owner', '7');
 const env = { KV, BOT_TOKEN: BOT, DATA_TOKEN: 'gh', DATA_OWNER: 'me', PUSH_KEY: 'k', APP_URL: 'https://x/' };
+env.LOCK = memoryDO(LockStore, env);
+const stored = () => env.LOCK.get('lock').storage.map.get('rec');
 const data = typicalData();
 net.remote = JSON.stringify(data);
 const OWNER = await initData(7, T);
@@ -49,8 +51,9 @@ assert.equal((await call('/api/lock/set', { code: '12a4' })).reason, 'invalid', 
 assert.equal((await call('/api/lock/set', { code: '12345' })).reason, 'invalid');
 assert.equal((await call('/api/lock/set', { code: '2580' })).ok, true);
 assert.equal((await call('/api/lock/status')).hasCode, true);
-const rec = JSON.parse(KV.map.get(LOCK_KEY));
-assert.ok(rec.hash && rec.salt && !JSON.stringify(rec).includes('2580'), 'в KV только хеш');
+const rec = stored();
+assert.ok(rec.hash && rec.salt && !JSON.stringify(rec).includes('2580'), 'в хранилище только хеш');
+assert.equal(KV.map.get(LOCK_KEY), undefined, 'в KV код больше не пишется');
 assert.equal((await call('/api/lock/set', { code: '1111' })).reason, 'wrong', 'смена — только с текущим кодом');
 assert.equal((await call('/api/lock/set', { code: '1111', current: '2580' })).ok, true);
 assert.equal((await call('/api/lock/set', { code: '2580', current: '1111' })).ok, true);
@@ -96,7 +99,7 @@ assert.deepEqual(steps, [60, 300, 900, 900], 'затем 1, 5, 15 мин');
 T += 16 * 60e3;
 setNow(T);
 assert.equal((await call('/api/lock/verify', { code: '2580' })).ok, true, 'после паузы верный код');
-assert.equal(JSON.parse(KV.map.get(LOCK_KEY)).fails, 0, 'счётчик сброшен');
+assert.equal(stored().fails, 0, 'счётчик сброшен');
 assert.equal(afterFail({ fails: 3 }, 0).until, 0);
 assert.equal(retryIn(afterFail({ fails: 4 }, 0), 0), 30);
 console.log('✓ ошибки: 4 без паузы, 5-я → 30 с, затем 1/5/15 мин; пауза на сервере; верный код сбрасывает счётчик');
@@ -114,7 +117,7 @@ assert.equal((await call('/api/lock/status')).hasCode, true, 'чужой пол�
 await hook({ callback_query: { id: 'q2', from: { id: 7 }, data: 'lockreset:wrongnonce', message: { chat: { id: 7 }, message_id: 1 } } });
 assert.equal((await call('/api/lock/status')).hasCode, true, 'неверный ключ не сбрасывает');
 await hook({ callback_query: { id: 'q3', from: { id: 7 }, data: cb, message: { chat: { id: 7 }, message_id: 1 } } });
-assert.equal((await call('/api/lock/status')).hasCode, false, 'сброшено');
+assert.equal((await call('/api/lock/status')).hasCode, false, 'сброшено — и сразу видно трекеру (тот же объект, без кэша)');
 assert.ok(net.tg.some((x) => x.method === 'answerCallbackQuery' && x.body.text === 'Код сброшен'));
 assert.equal((await call('/api/lock/set', { code: '4321' })).ok, true, 'новый код без старого');
 await hook({ callback_query: { id: 'q4', from: { id: 7 }, data: cb, message: { chat: { id: 7 }, message_id: 1 } } });
@@ -162,6 +165,53 @@ assert.ok(!sent.some((x) => x.method === 'sendDocument'), 'при защите �
 console.log('✓ бот: при защите чек-ин без названий, автобэкап не отправляется; без защиты — как раньше');
 
 // 7. Код нигде в открытом виде
-const all = [...logs, net.remote, ...[...KV.map.values()]].join('\n');
+const all = [...logs, net.remote, ...[...KV.map.values()], JSON.stringify([...env.LOCK.get('lock').storage.map.values()])].join('\n');
 for (const code of ['2580', '1111', '4321']) assert.ok(!all.includes(`"${code}"`) && !logs.some((l) => l.includes(code)), `код ${code} не утёк`);
 console.log('✓ код не попадает в логи, data.json и KV');
+
+// 8. Перенос из KV: код, заданный в прошлой версии, продолжает работать
+{
+  const KV2 = memoryKV();
+  KV2.map.set('owner', '7');
+  const old = await makeRecord('7777', BOT);
+  KV2.map.set(LOCK_KEY, JSON.stringify({ ...old, fails: 2 }));
+  const env2 = { ...env, KV: KV2 };
+  env2.LOCK = memoryDO(LockStore, env2);
+  const c2 = async (path, body = {}) => (await worker.fetch(new Request(`https://w${path}`, { method: 'POST', headers: { 'X-Init-Data': OWNER }, body: JSON.stringify(body) }), env2)).json();
+  assert.equal((await c2('/api/lock/status')).hasCode, true);
+  assert.equal((await c2('/api/lock/verify', { code: '7777' })).ok, true, 'старый код подходит');
+  KV2.map.set(LOCK_KEY, JSON.stringify(await makeRecord('0000', BOT))); // KV больше не читается
+  assert.equal((await c2('/api/lock/verify', { code: '7777' })).ok, true, 'перенос — один раз');
+  console.log('✓ перенос из KV: код прошлой версии работает, перенос разовый');
+}
+
+// 9. Параллельные попытки не обходят счётчик
+{
+  await call('/api/lock/set', { code: '2580' }).catch(() => {});
+  T += 30 * 60e3;
+  setNow(T);
+  const st0 = await call('/api/lock/status');
+  if (!st0.hasCode) await call('/api/lock/set', { code: '2580' });
+  assert.equal(stored().fails || 0, 0);
+  const res = await Promise.all(Array.from({ length: 10 }, () => call('/api/lock/verify', { code: '0000' })));
+  // строго по очереди: 5 неверных (5-я включила паузу), остальные 5 — уже в паузе, без проверки кода
+  assert.equal(res.filter((x) => x.reason === 'wrong').length, 5);
+  assert.equal(res.filter((x) => x.reason === 'pause').length, 5);
+  assert.equal(stored().fails, 5, 'ни одна попытка не потерялась');
+  const fails = 5, before = 0;
+  console.log(`✓ 10 параллельных неверных попыток: ${fails - before} ошибок по очереди, остальные — пауза`);
+}
+
+// 10. Бот не смог отправить «Забыл код» — повторный запрос не упирается в лимит минуты
+{
+  T += 30 * 60e3;
+  setNow(T);
+  await call('/api/lock/verify', { code: '2580' });
+  net.tgFail = 1;
+  const r1 = await call('/api/lock/forgot');
+  assert.equal(r1.ok, false);
+  const r2 = await call('/api/lock/forgot');
+  assert.equal(r2.sent, true, 'после сбоя отправки можно сразу повторить');
+  assert.equal(r2.nonce, undefined, 'ключ сброса клиенту не отдаётся');
+  console.log('✓ сбой отправки «Забыл код» не расходует лимит; ключ клиенту не отдаётся');
+}

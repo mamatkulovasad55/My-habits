@@ -6,7 +6,7 @@ import { replaceData, merge } from '../js/store.js';
 import { dueReminders } from '../js/schedule.js';
 import { stableStringify, dkey, addDays, pad, plural } from '../js/util.js';
 import { cityTz } from '../js/prayer.js';
-import { LOCK_KEY, NONCE_TTL, FORGOT_EVERY, validCode, makeRecord, hasCode, retryIn, checkCode, randomB64, sameString } from './lock.js';
+export { LockStore } from './lock.js';
 import { verifyInitData, webhookSecret, tg, tgDocument, escHtml, openButton } from './telegram.js';
 
 const CORS = {
@@ -162,73 +162,42 @@ async function api(req, env, path) {
 }
 
 // ---------- Код раздела «Воздержание» ----------
-// Запись в KV `lock`: { salt, hash, iter, fails, until, nonce, nonceExp, forgotAt }. Код приходит только в теле запроса
-// и никуда не пишется в открытом виде. Лимит попыток — здесь, на сервере: перезапуск мини-аппа его не сбрасывает.
+// Код, счётчик ошибок и ключ сброса живут в Durable Object LockStore (worker/lock.js): строго согласованное
+// хранилище, сброс кнопкой бота виден трекеру сразу. Код приходит только в теле запроса и никуда не пишется.
 
-async function loadLock(env) {
-  const rec = await kvGet(env, LOCK_KEY, 'json');
-  if (rec === undefined) throw new Error('Хранилище временно недоступно, попробуй позже');
-  return rec && typeof rec === 'object' ? rec : {};
+async function lockOp(env, op, extra = {}) {
+  if (!env.LOCK) throw new Error('Хранилище кода не настроено');
+  const stub = env.LOCK.get(env.LOCK.idFromName('lock'));
+  const res = await stub.fetch('https://lock/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op, ...extra }) });
+  return res.json();
 }
 
-async function saveLock(env, rec) {
-  if (!(await kvPut(env, LOCK_KEY, JSON.stringify(rec)))) throw new Error('Не удалось сохранить, попробуй ещё раз');
-  pendingWrites++; // учёт в счётчике записей KV
-}
-
-const lockState = (rec, now = Date.now()) => ({ hasCode: hasCode(rec), retryIn: hasCode(rec) ? retryIn(rec, now) : 0 });
+const lockJson = ({ httpStatus, nonce, ...out }) => json(out, httpStatus || 200); // ключ сброса клиенту не отдаём
 
 async function lockApi(env, path, body, owner) {
   try {
-    const now = Date.now();
-    const rec = await loadLock(env);
-    if (path === '/api/lock/status') return json(lockState(rec, now));
-
-    // проверка текущего кода с лимитом попыток (verify и смена кода)
-    const check = async (code) => {
-      const wait = retryIn(rec, now);
-      if (wait) return { res: json({ ok: false, reason: 'pause', ...lockState(rec, now), error: 'Подожди и попробуй снова' }) };
-      const r = await checkCode(rec, code, env.BOT_TOKEN, now);
-      await saveLock(env, { ...r.rec, nonce: r.ok ? undefined : rec.nonce, nonceExp: r.ok ? undefined : rec.nonceExp });
-      return r.ok ? { ok: true } : { res: json({ ok: false, reason: 'wrong', ...lockState(r.rec, now), error: 'Неверный код' }) };
-    };
-
-    if (path === '/api/lock/verify') {
-      if (!hasCode(rec)) return json({ ok: false, reason: 'nocode', hasCode: false, retryIn: 0, error: 'Код не задан' });
-      const r = await check(body.code);
-      return r.ok ? json({ ok: true, hasCode: true, retryIn: 0 }) : r.res;
-    }
-    if (path === '/api/lock/set') {
-      if (!validCode(body.code)) return json({ ok: false, reason: 'invalid', error: 'Код — 4 цифры' });
-      if (hasCode(rec)) {
-        const r = await check(body.current);
-        if (!r.ok) return r.res;
-      }
-      await saveLock(env, { ...(await makeRecord(body.code, env.BOT_TOKEN)), forgotAt: rec.forgotAt || 0 });
-      return json({ ok: true, hasCode: true, retryIn: 0 });
-    }
-    if (path === '/api/lock/clear') {
-      // выключение защиты или смена кода по биометрии: клиент уже подтвердил человека (защита на уровне интерфейса)
-      if (retryIn(rec, now)) return json({ ok: false, reason: 'pause', ...lockState(rec, now), error: 'Подожди и попробуй снова' });
-      await saveLock(env, { forgotAt: rec.forgotAt || 0 });
-      return json({ ok: true, hasCode: false, retryIn: 0 });
-    }
-    if (path === '/api/lock/forgot') {
-      if (!hasCode(rec)) return json({ ok: true, hasCode: false });
-      if (now - (Number(rec.forgotAt) || 0) < FORGOT_EVERY) return json({ ok: true, sent: false, error: 'Сообщение уже отправлено — проверь чат с ботом' });
-      const nonce = randomB64(12).replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
+    const op = path.slice('/api/lock/'.length);
+    if (op === 'status') return lockJson(await lockOp(env, 'status'));
+    if (op === 'verify') return lockJson(await lockOp(env, 'verify', { code: body.code }));
+    if (op === 'set') return lockJson(await lockOp(env, 'set', { code: body.code, current: body.current }));
+    if (op === 'clear') return lockJson(await lockOp(env, 'clear'));
+    if (op === 'forgot') {
+      const r = await lockOp(env, 'forgot');
+      if (!r.nonce) return lockJson(r);
       const sent = await sendTg(env, 'sendMessage', {
         chat_id: Number(owner),
         text: 'Сбросить код защищённого раздела трекера? Данные останутся на месте, при следующем входе нужно будет задать новый код.',
-        reply_markup: { inline_keyboard: [[{ text: 'Сбросить код', callback_data: `lockreset:${nonce}` }]] },
+        reply_markup: { inline_keyboard: [[{ text: 'Сбросить код', callback_data: `lockreset:${r.nonce}` }]] },
       });
-      if (!sent) return json({ error: 'Бот не смог отправить сообщение, попробуй позже' }, 502);
-      await saveLock(env, { ...rec, nonce, nonceExp: now + NONCE_TTL, forgotAt: now });
+      if (!sent) {
+        await lockOp(env, 'forgotAbort', { nonce: r.nonce });
+        return json({ ok: false, error: 'Бот не смог отправить сообщение, попробуй позже' }, 502);
+      }
       return json({ ok: true, sent: true });
     }
     return json({ error: 'Not found' }, 404);
   } catch (e) {
-    return json({ error: e.message || 'Ошибка сервера' }, 503);
+    return json({ ok: false, error: e.message || 'Ошибка сервера' }, 503);
   }
 }
 
@@ -236,12 +205,14 @@ async function lockApi(env, path, body, owner) {
 async function lockResetCallback(env, cq) {
   const answer = (text) => sendTg(env, 'answerCallbackQuery', { callback_query_id: cq.id, text });
   const owner = await getOwner(env);
-  const nonce = String(cq.data || '').slice('lockreset:'.length);
-  const rec = await kvGet(env, LOCK_KEY, 'json');
-  const valid = owner && String(cq.from?.id) === owner && rec && rec.nonce && sameString(nonce, rec.nonce) && Date.now() < (Number(rec.nonceExp) || 0);
-  if (!valid) return answer('Ссылка устарела');
-  if (!(await kvPut(env, LOCK_KEY, JSON.stringify({ forgotAt: rec.forgotAt || 0 })))) return answer('Не получилось, попробуй ещё раз');
-  pendingWrites++;
+  if (!owner || String(cq.from?.id) !== owner) return answer('Ссылка устарела');
+  let r;
+  try {
+    r = await lockOp(env, 'reset', { nonce: String(cq.data || '').slice('lockreset:'.length) });
+  } catch {
+    return answer('Не получилось, попробуй ещё раз');
+  }
+  if (!r.ok) return answer('Ссылка устарела');
   await answer('Код сброшен');
   if (cq.message) {
     await sendTg(env, 'editMessageText', {

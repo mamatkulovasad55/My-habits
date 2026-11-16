@@ -83,3 +83,31 @@ export async function runCron(worker, env) {
   await worker.scheduled({}, env, { waitUntil: (p) => waits.push(p) });
   await Promise.all(waits);
 }
+
+/** Durable Object в памяти: namespace с idFromName/get, один экземпляр на имя, хранилище — Map. */
+export function memoryDO(Cls, env) {
+  const objects = new Map();
+  const ns = {
+    objects,
+    idFromName: (name) => name,
+    get(id) {
+      if (!objects.has(id)) {
+        const map = new Map();
+        const storage = {
+          map,
+          async get(k) {
+            return map.has(k) ? structuredClone(map.get(k)) : undefined;
+          },
+          async put(k, v) {
+            if (typeof k === 'object') for (const [kk, vv] of Object.entries(k)) map.set(kk, structuredClone(vv));
+            else map.set(k, structuredClone(v));
+          },
+        };
+        const obj = new Cls({ storage }, env);
+        objects.set(id, { obj, storage, fetch: (url, init) => obj.fetch(new Request(url, init)) });
+      }
+      return objects.get(id);
+    },
+  };
+  return ns;
+}
