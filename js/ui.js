@@ -47,6 +47,8 @@ export const icon = {
   clock: (s) => svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', s, 2.2),
   book: (s) => svg('<path d="M4 5.5C6.5 4.5 9.5 4.5 12 6c2.5-1.5 5.5-1.5 8-.5v13c-2.5-1-5.5-1-8 .5-2.5-1.5-5.5-1.5-8-.5z"/><path d="M12 6v13"/>', s, 2),
   dome: (s) => svg('<path d="M8 20v-5.5a4 4 0 0 1 8 0V20z" fill="currentColor" stroke="none"/><path d="M12 10.5V8M4.5 20v-9M19.5 20v-9M3 20h18"/><path d="M4.5 9.5l0-.5M19.5 9.5V9"/>', s, 2),
+  key: (s) => svg('<circle cx="8" cy="15" r="4"/><path d="M11 12l8.5-8.5M16 7l2.5 2.5M14 9l2 2"/>', s, 2.2),
+  backspace: (s) => svg('<path d="M9 5.5h10a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-6-6.5z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/>', s, 1.9),
   calendar: (s) => svg('<rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 10h16M8.5 3.5v3M15.5 3.5v3"/><circle cx="12" cy="15" r="1.6" fill="currentColor" stroke="none"/>', s, 2),
   hourglass: (s) => svg('<path d="M7 3.5h10M7 20.5h10M8 3.5c0 4.5 4 5.5 4 8.5s-4 4-4 8.5M16 3.5c0 4.5-4 5.5-4 8.5s4 4 4 8.5"/>', s, 2),
   bell: (s) => svg('<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" fill="currentColor"/><path d="M10 20.5a2 2 0 0 0 4 0"/>', s, 1.8),

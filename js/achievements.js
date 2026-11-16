@@ -13,7 +13,7 @@ export const ACH_GROUPS = [
   { id: 'namaz', title: 'Намаз' },
   { id: 'qada', title: 'Каза' },
   { id: 'habits', title: 'Привычки' },
-  { id: 'abstain', title: 'Воздержание', private: true },
+  { id: 'abstain', title: 'Детокс', private: true },
 ];
 
 /**
