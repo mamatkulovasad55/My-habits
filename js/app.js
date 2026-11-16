@@ -1736,7 +1736,7 @@ function viewProfile() {
 
     <div class="group-title">Намаз</div>
     <div class="card list-group">
-      ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'Метод Узбекистана' : 'Сверено', glyph: 'dome', tint: 'var(--green)' })}
+      ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'По формуле' : 'Сверено', glyph: 'dome', tint: 'var(--green)' })}
       ${navRow('juma', { label: 'Джума', value: st.juma.enabled ? 'Вкл' : 'Выкл', glyph: 'calendar', tint: 'var(--green)' })}
       ${navRow('qada', { label: 'Каза', value: d.total ? `Осталось ${d.total}` : 'Нет долгов', glyph: 'hourglass', tint: 'var(--orange)' })}
       ${navRow('hijri', { label: 'Хиджрийский календарь', value: formatHijri(toHijri(today(), st)), glyph: 'moon', tint: 'var(--indigo)', below: true })}
