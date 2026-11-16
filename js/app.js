@@ -161,7 +161,7 @@ function viewToday() {
         ${ring(s.ratio ?? 0, { size: 92, stroke: 10, key: 'summary', color: 'var(--green)', inner: `<span class="summary-pct">${s.total ? Math.round((s.ratio || 0) * 100) : 0}<small>%</small></span>` })}
         <div class="summary-text">
           <div class="summary-title">${allDone ? 'Все цели выполнены' : s.total ? `Выполнено ${s.done} из ${s.total}` : 'На этот день ничего не запланировано'}</div>
-          <div class="summary-sub">${allDone ? 'Отличная работа — так держать 🎉' : s.total ? `Осталось ${s.total - s.done} — ты справишься` : 'Можно отдохнуть'}</div>
+          <div class="summary-sub">${allDone ? 'Отличная работа — так держать 🎉' : s.total ? summaryRest(s) : 'Можно отдохнуть'}</div>
         </div>
       </section>`
     : '';
@@ -399,6 +399,13 @@ function tapStage(h, day) {
 
 const STATUS_CLASS = { ontime: 'is-done', late: 'is-done', qada: 'is-qada', missed: 'is-missed' };
 
+/** Подпись под «Выполнено N из M»: объясняет процент кольца, если часть привычек начата, но не закрыта. */
+function summaryRest(s) {
+  const rest = s.total - s.done - (s.started || 0);
+  if (!s.started) return `Осталось ${s.total - s.done} — ты справишься`;
+  return rest ? `В процессе: ${s.started} · не начато: ${rest}` : `В процессе: ${s.started} — почти готово`;
+}
+
 /** Плашка «Сила N» для привычек-ибадата (вместо серии). */
 function strengthChip(h) {
   const v = strengthOf(h);
@@ -556,7 +563,7 @@ function habitCard(h, day) {
     ${ring(v / g, { size: 46, stroke: 4.5, color: h.color, key: `h-${h.id}-${key}`, inner: `<span class="emoji">${esc(h.emoji)}</span>` })}
     <div class="hmain">
       <div class="hname">${esc(h.name)}</div>
-      <div class="hsub">${sub.map((x, i) => `<span class="seg">${x}${i < sub.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join(' ')}</div>
+      <div class="hsub"><div class="hsub-in">${sub.map((x) => `<span class="seg">${x}</span>`).join('')}</div></div>
     </div>
     ${action}
   </article>`;
@@ -598,7 +605,7 @@ function stagedCard(h, day) {
     ${ring(v / g, { size: 46, stroke: 4.5, color: h.color, key: `h-${h.id}-${key}`, inner: `<span class="emoji">${esc(h.emoji)}</span>` })}
     <div class="hmain">
       <div class="hname">${esc(h.name)}</div>
-      <div class="hsub">${sub.map((x, i) => `<span class="seg">${x}${i < sub.length - 1 ? '<span class="dot">·</span>' : ''}</span>`).join(' ')}</div>
+      <div class="hsub"><div class="hsub-in">${sub.map((x) => `<span class="seg">${x}</span>`).join('')}</div></div>
       ${stageDots(h, day)}
     </div>
     ${action}
@@ -1566,7 +1573,7 @@ function viewStats() {
       <div class="tile"><div class="tile-label">Сегодня</div><div class="tile-val" style="color:var(--green)">${pct(td.ratio)}</div></div>
       <div class="tile"><div class="tile-label">7 дней</div><div class="tile-val">${pct(rangeRate(7))}</div></div>
       <div class="tile"><div class="tile-label">30 дней</div><div class="tile-val">${pct(rangeRate(30))}</div></div>
-      <div class="tile"><div class="tile-label">Лучшая текущая серия</div><div class="tile-val" style="color:var(--orange)">${bestCur}<small> ${plural(bestCur, DAY_FORMS)}</small></div></div>
+      <div class="tile"><div class="tile-label">Серия сейчас</div><div class="tile-val" style="color:var(--orange)">${bestCur}<small> ${plural(bestCur, DAY_FORMS)}</small></div></div>
     </div>
     <div class="group-title">Последние 14 дней</div>
     <div class="card pad">${barChart(bars, { color: 'var(--green)' })}</div>
