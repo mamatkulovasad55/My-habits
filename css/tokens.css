@@ -1,0 +1,210 @@
+/* ============================================================
+   Дизайн-токены iOS 27
+   Источник: Figma «iOS 27 Builder», коллекции Colors (Light/Dark),
+   Typography (Large, Default), Layout.
+   Имена повторяют Figma: Labels/Secondary → --ios-label-secondary.
+   Компоненты эти токены напрямую не используют, только через
+   семантические переменные в styles.css (--bg, --label, --accent…).
+   ============================================================ */
+
+:root {
+  /* ---------- Labels ---------- */
+  --ios-label-primary: #000000;
+  --ios-label-secondary: rgba(60, 60, 67, 0.6);
+  --ios-label-tertiary: rgba(60, 60, 67, 0.3);
+  --ios-label-quaternary: rgba(60, 60, 67, 0.18);
+  --ios-label-placeholder: rgba(60, 60, 67, 0.3);
+  --ios-label-link: #007AFF;
+
+  /* ---------- Backgrounds ---------- */
+  --ios-bg-primary: #FFFFFF;
+  --ios-bg-secondary: #F2F2F7;
+  --ios-bg-tertiary: #FFFFFF;
+  --ios-bg-grouped-primary: #F2F2F7;
+  --ios-bg-grouped-secondary: #FFFFFF;
+  --ios-bg-grouped-tertiary: #F2F2F7;
+  /* Elevated: шторки и модальные слои (в тёмной теме светлее базы) */
+  --ios-bg-grouped-primary-elevated: #F2F2F7;
+  --ios-bg-grouped-secondary-elevated: #FFFFFF;
+  --ios-bg-grouped-tertiary-elevated: #F2F2F7;
+
+  /* ---------- Fills ---------- */
+  --ios-fill-primary: rgba(120, 120, 128, 0.2);
+  --ios-fill-secondary: rgba(120, 120, 128, 0.16);
+  --ios-fill-tertiary: rgba(118, 118, 128, 0.12);
+  --ios-fill-quaternary: rgba(116, 116, 128, 0.08);
+
+  /* ---------- Separators & overlays ---------- */
+  --ios-separator: rgba(60, 60, 67, 0.12);
+  --ios-separator-opaque: #E7E7E8;
+  --ios-overlay: rgba(0, 0, 0, 0.2);
+
+  /* ---------- Grays ---------- */
+  --ios-gray: #8E8E93;
+  --ios-gray-2: #AEAEB2;
+  --ios-gray-3: #C7C7CC;
+  --ios-gray-4: #D1D1D6;
+  --ios-gray-5: #E5E5EA;
+  --ios-gray-6: #F2F2F7;
+
+  /* ---------- Accents (палитра iOS 26/27) ---------- */
+  --ios-red: #FF383C;
+  --ios-orange: #FF8D28;
+  --ios-yellow: #FFCC00;
+  --ios-green: #34C759;
+  --ios-mint: #00C8B3;
+  --ios-teal: #00C3D0;
+  --ios-cyan: #00C0E8;
+  --ios-blue: #0088FF;
+  --ios-indigo: #6155F5;
+  --ios-purple: #CB30E0;
+  --ios-pink: #FF2D55;
+  --ios-brown: #AC7F5E;
+
+  /* ---------- Controls ---------- */
+  --ios-segmented-selected: #FFFFFF;
+  --ios-destructive-bg: rgba(255, 56, 60, 0.14);
+
+  /* ---------- Typography (Large / Default) ----------
+     size / line-height / letter-spacing в px, как в Figma */
+  --ios-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, "Segoe UI", Roboto, sans-serif;
+  --ios-large-title: 34px;  --ios-large-title-lh: 41px; --ios-large-title-ls: 0.4px;
+  --ios-title-1: 28px;      --ios-title-1-lh: 34px;     --ios-title-1-ls: 0.38px;
+  --ios-title-2: 22px;      --ios-title-2-lh: 28px;     --ios-title-2-ls: -0.26px;
+  --ios-title-3: 20px;      --ios-title-3-lh: 25px;     --ios-title-3-ls: -0.45px;
+  --ios-headline: 17px;     --ios-headline-lh: 22px;    --ios-headline-ls: -0.43px; /* semibold */
+  --ios-body: 17px;         --ios-body-lh: 22px;        --ios-body-ls: -0.43px;
+  --ios-callout: 16px;      --ios-callout-lh: 21px;     --ios-callout-ls: -0.31px;
+  --ios-subheadline: 15px;  --ios-subheadline-lh: 20px; --ios-subheadline-ls: -0.23px;
+  --ios-footnote: 13px;     --ios-footnote-lh: 18px;    --ios-footnote-ls: -0.08px;
+  --ios-caption-1: 12px;    --ios-caption-1-lh: 16px;   --ios-caption-1-ls: 0px;
+  --ios-caption-2: 11px;    --ios-caption-2-lh: 13px;   --ios-caption-2-ls: 0.06px;
+  --ios-tab-label: 10px;    --ios-tab-label-lh: 12px;   /* semibold */
+
+  /* ---------- Layout ---------- */
+  --ios-space-xxs: 2px;
+  --ios-space-xs: 4px;
+  --ios-space-s: 8px;
+  --ios-space-m: 12px;
+  --ios-space-l: 16px;
+  --ios-space-xl: 24px;
+  --ios-space-xxl: 32px;
+  --ios-space-xxxl: 48px;
+
+  --ios-radius-xs: 5px;
+  --ios-radius-s: 8px;
+  --ios-radius-m: 12px;
+  --ios-radius-l: 16px;
+  --ios-radius-xl: 20px;
+  --ios-radius-xxl: 26px;
+  --ios-radius-bubble: 18px;
+  --ios-radius-sheet: 38px;
+  --ios-radius-full: 1000px;
+}
+
+/* ---------- Тёмная тема ----------
+   Набор повторяется дважды: для системной тёмной темы и для ручного
+   переключателя (data-theme="dark"), как и в styles.css. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ios-label-primary: #FFFFFF;
+    --ios-label-secondary: rgba(235, 235, 245, 0.6);
+    --ios-label-tertiary: rgba(235, 235, 245, 0.3);
+    --ios-label-quaternary: rgba(235, 235, 245, 0.16);
+    --ios-label-placeholder: rgba(235, 235, 245, 0.3);
+    --ios-label-link: #0984FF;
+
+    --ios-bg-primary: #000000;
+    --ios-bg-secondary: #1C1C1E;
+    --ios-bg-tertiary: #2C2C2E;
+    --ios-bg-grouped-primary: #000000;
+    --ios-bg-grouped-secondary: #1C1C1E;
+    --ios-bg-grouped-tertiary: #2C2C2E;
+    --ios-bg-grouped-primary-elevated: #1C1C1E;
+    --ios-bg-grouped-secondary-elevated: #2C2C2E;
+    --ios-bg-grouped-tertiary-elevated: #3A3A3C;
+
+    --ios-fill-primary: rgba(120, 120, 128, 0.36);
+    --ios-fill-secondary: rgba(120, 120, 128, 0.32);
+    --ios-fill-tertiary: rgba(118, 118, 128, 0.24);
+    --ios-fill-quaternary: rgba(118, 118, 128, 0.18);
+
+    --ios-separator: rgba(84, 84, 88, 0.5);
+    --ios-separator-opaque: #2A2A2C;
+    --ios-overlay: rgba(0, 0, 0, 0.48);
+
+    --ios-gray: #8E8E93;
+    --ios-gray-2: #636366;
+    --ios-gray-3: #48484A;
+    --ios-gray-4: #3A3A3C;
+    --ios-gray-5: #2C2C2E;
+    --ios-gray-6: #1C1C1E;
+
+    --ios-red: #FF4245;
+    --ios-orange: #FF9230;
+    --ios-yellow: #FFD600;
+    --ios-green: #30D158;
+    --ios-mint: #00DAC3;
+    --ios-teal: #00D2E0;
+    --ios-cyan: #3CD3FE;
+    --ios-blue: #0091FF;
+    --ios-indigo: #6D7CFF;
+    --ios-purple: #DB34F2;
+    --ios-pink: #FF375F;
+    --ios-brown: #B78A66;
+
+    --ios-segmented-selected: #636366;
+    --ios-destructive-bg: rgba(255, 66, 69, 0.14);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ios-label-primary: #FFFFFF;
+  --ios-label-secondary: rgba(235, 235, 245, 0.6);
+  --ios-label-tertiary: rgba(235, 235, 245, 0.3);
+  --ios-label-quaternary: rgba(235, 235, 245, 0.16);
+  --ios-label-placeholder: rgba(235, 235, 245, 0.3);
+  --ios-label-link: #0984FF;
+
+  --ios-bg-primary: #000000;
+  --ios-bg-secondary: #1C1C1E;
+  --ios-bg-tertiary: #2C2C2E;
+  --ios-bg-grouped-primary: #000000;
+  --ios-bg-grouped-secondary: #1C1C1E;
+  --ios-bg-grouped-tertiary: #2C2C2E;
+  --ios-bg-grouped-primary-elevated: #1C1C1E;
+  --ios-bg-grouped-secondary-elevated: #2C2C2E;
+  --ios-bg-grouped-tertiary-elevated: #3A3A3C;
+
+  --ios-fill-primary: rgba(120, 120, 128, 0.36);
+  --ios-fill-secondary: rgba(120, 120, 128, 0.32);
+  --ios-fill-tertiary: rgba(118, 118, 128, 0.24);
+  --ios-fill-quaternary: rgba(118, 118, 128, 0.18);
+
+  --ios-separator: rgba(84, 84, 88, 0.5);
+  --ios-separator-opaque: #2A2A2C;
+  --ios-overlay: rgba(0, 0, 0, 0.48);
+
+  --ios-gray: #8E8E93;
+  --ios-gray-2: #636366;
+  --ios-gray-3: #48484A;
+  --ios-gray-4: #3A3A3C;
+  --ios-gray-5: #2C2C2E;
+  --ios-gray-6: #1C1C1E;
+
+  --ios-red: #FF4245;
+  --ios-orange: #FF9230;
+  --ios-yellow: #FFD600;
+  --ios-green: #30D158;
+  --ios-mint: #00DAC3;
+  --ios-teal: #00D2E0;
+  --ios-cyan: #3CD3FE;
+  --ios-blue: #0091FF;
+  --ios-indigo: #6D7CFF;
+  --ios-purple: #DB34F2;
+  --ios-pink: #FF375F;
+  --ios-brown: #B78A66;
+
+  --ios-segmented-selected: #636366;
+  --ios-destructive-bg: rgba(255, 66, 69, 0.14);
+}
