@@ -817,7 +817,7 @@ function stageEditor(h, day) {
       ontime: `${kindLabel}отмечено в ${at}`,
       late: `${kindLabel}вовремя, отмечено в ${at}`,
       qada: `каза · восполнено в ${at}`,
-      missed: `не отмечено (${window_}) · долг, можно восполнить`,
+      missed: `${window_} · пропущен, в долг`,
     }[status] || (ok && at ? `отмечено в ${at}` : window_);
     const range = s.max && s.max !== s.min ? `${s.min}–${s.max}` : `${s.min}`;
     const control = h.type === 'count'
@@ -964,7 +964,8 @@ function openHabitEditor(existing) {
       <div class="sheet-body">
         <div class="hero-input" style="--c:${f.color}">
           <div class="emoji-badge">${esc(f.emoji)}</div>
-          <input class="name-input" data-e="name" placeholder="Например, пить воду" value="${esc(f.name)}" maxlength="40" autocomplete="off">
+          <label class="name-cap" for="name-habit">Название</label>
+          <input class="name-input" id="name-habit" data-e="name" placeholder="Например, пить воду" value="${esc(f.name)}" maxlength="40" autocomplete="off">
         </div>
 
         <div class="group-title">Цвет</div>
@@ -1359,7 +1360,8 @@ function openAbstainEditor(existing) {
       <div class="sheet-body">
         <div class="hero-input" style="--c:${f.color}">
           <div class="emoji-badge">${esc(f.emoji)}</div>
-          <input class="name-input" data-e="name" placeholder="Например, курение" value="${esc(f.name)}" maxlength="40" autocomplete="off">
+          <label class="name-cap" for="name-abst">Название</label>
+          <input class="name-input" id="name-abst" data-e="name" placeholder="Например, курение" value="${esc(f.name)}" maxlength="40" autocomplete="off">
         </div>
         <div class="group-title">Начало воздержания</div>
         <div class="card pad">
@@ -1462,7 +1464,7 @@ function openAbstainDetail(id) {
           <div class="tiles">
             <div class="tile"><div class="tile-label">Рекорд</div><div class="tile-val" style="color:${a.color}">${esc(fmtDuration(best)).replace(/([^\d\s]+)/g, '<small>$1</small>')}</div></div>
             <div class="tile"><div class="tile-label">Чистых дней</div><div class="tile-val">${(a.cleanDays || []).length}</div></div>
-            <div class="tile"><div class="tile-label">Попытка</div><div class="tile-val">${(a.attempts || []).length + 1}-я</div></div>
+            <div class="tile"><div class="tile-label">Попытка №</div><div class="tile-val">${(a.attempts || []).length + 1}</div></div>
             <div class="tile"><div class="tile-label">Срывов</div><div class="tile-val">${(a.attempts || []).length}</div></div>
           </div>
 
@@ -1564,7 +1566,7 @@ function viewStats() {
   const abstRows = abst
     .map((a) => `<button class="row" data-action="open-abstain" data-id="${a.id}">
         <span class="emoji-chip" style="--c:${a.color}">${esc(a.emoji)}</span>
-        <div class="row-main"><b>${esc(a.name)}</b><span class="muted">рекорд ${esc(fmtDuration(abstainBest(a)))} · ${(a.cleanDays || []).length} ${plural((a.cleanDays || []).length, ['чистый день', 'чистых дня', 'чистых дней'])}</span></div>
+        <div class="row-main"><b>${esc(a.name)}</b><span class="muted">рекорд ${esc(fmtDuration(abstainBest(a)))} · ${(a.cleanDays || []).length}&nbsp;${plural((a.cleanDays || []).length, ['чистый&nbsp;день', 'чистых&nbsp;дня', 'чистых&nbsp;дней'])}</span></div>
         <span class="row-val" data-live-abs-short="${a.id}">${esc(fmtDuration(abstainElapsed(a)))}</span>
       </button>`)
     .join('');
@@ -1624,9 +1626,12 @@ function syncStatusHTML() {
   return `<span class="status-dot" style="background:var(--${c})"></span><span>${esc(text)}</span>`;
 }
 
+/** Для строки «Данные»: в одну строку — «✓ 21:48» вместо «Синхронизировано · 21:48». */
 const syncStatusShort = () => {
   const s = sync.getStatus();
-  return s.state === 'offline' ? 'Нет сети' : syncStatusParts()[1];
+  if (s.state === 'offline') return 'Нет сети';
+  if (s.state === 'idle' && s.last) return `✓ ${new Date(s.last).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+  return syncStatusParts()[1];
 };
 
 const NIYYAH_MAX = 300;
@@ -1676,9 +1681,9 @@ function tzValue(st) {
   return st.tzAuto !== false ? `Авто · ${tzLabel(st.tz)}` : `${st.tz.split('/').pop().replace(/_/g, ' ')} · ${tzLabel(st.tz)}`;
 }
 
-function navRow(sub, { label, value = '', emoji, tint = 'var(--accent)', below = false }) {
+function navRow(sub, { label, value = '', glyph, tint = 'var(--accent)', below = false }) {
   return `<button class="row nav-row" data-nav="${sub}">
-    <span class="nav-ic" style="--c:${tint}">${emoji}</span>
+    <span class="nav-ic" style="--c:${tint}">${icon[glyph](18)}</span>
     ${below ? `<span class="nav-label nav-stack"><span>${esc(label)}</span><span class="nav-sub">${esc(value)}</span></span><span class="nav-val"></span>` : `<span class="nav-label">${esc(label)}</span>
     <span class="nav-val" ${sub === 'data' ? 'id="sync-short"' : ''}>${esc(value)}</span>`}
     <span class="nav-chev">${icon.chevronR(16)}</span>
@@ -1726,31 +1731,31 @@ function viewProfile() {
 
     <div class="group-title">Личные параметры</div>
     <div class="card list-group">
-      ${navRow('city', { label: 'Город', value: st.prayer.city || '—', emoji: '📍', tint: 'var(--red)' })}
-      ${navRow('tz', { label: 'Часовой пояс', value: tzValue(st), emoji: '🕰', tint: 'var(--blue)' })}
-      ${navRow('madhab', { label: 'Мазхаб', value: MADHAB_LABEL[st.prayer.asr] || MADHAB_LABEL.hanafi, emoji: '📖', tint: 'var(--green)' })}
+      ${navRow('city', { label: 'Город', value: st.prayer.city || '—', glyph: 'pin', tint: 'var(--red)' })}
+      ${navRow('tz', { label: 'Часовой пояс', value: tzValue(st), glyph: 'clock', tint: 'var(--blue)' })}
+      ${navRow('madhab', { label: 'Мазхаб', value: MADHAB_LABEL[st.prayer.asr] || MADHAB_LABEL.hanafi, glyph: 'book', tint: 'var(--green)' })}
     </div>
 
     <div class="group-title">Намаз</div>
     <div class="card list-group">
-      ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'Метод Узбекистана' : 'Сверено', emoji: '🕌', tint: 'var(--green)' })}
-      ${navRow('juma', { label: 'Джума', value: st.juma.enabled ? 'Вкл' : 'Выкл', emoji: '🤲', tint: 'var(--green)' })}
-      ${navRow('qada', { label: 'Каза', value: d.total ? `Осталось ${d.total}` : 'Нет долгов', emoji: '⏳', tint: 'var(--orange)' })}
-      ${navRow('hijri', { label: 'Хиджрийский календарь', value: formatHijri(toHijri(today(), st)), emoji: '☾', tint: 'var(--indigo)', below: true })}
+      ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'Метод Узбекистана' : 'Сверено', glyph: 'dome', tint: 'var(--green)' })}
+      ${navRow('juma', { label: 'Джума', value: st.juma.enabled ? 'Вкл' : 'Выкл', glyph: 'calendar', tint: 'var(--green)' })}
+      ${navRow('qada', { label: 'Каза', value: d.total ? `Осталось ${d.total}` : 'Нет долгов', glyph: 'hourglass', tint: 'var(--orange)' })}
+      ${navRow('hijri', { label: 'Хиджрийский календарь', value: formatHijri(toHijri(today(), st)), glyph: 'moon', tint: 'var(--indigo)', below: true })}
     </div>
 
     <div class="group-title">Распорядок</div>
     <div class="card list-group">
-      ${navRow('routine', { label: 'Режим дня', value: `${st.wakeWd}–${st.sleepWd}`, emoji: '☀︎', tint: 'var(--orange)' })}
-      ${navRow('reminders', { label: 'Напоминания', value: st.checkin.enabled ? st.checkin.time : 'выкл', emoji: '🔔', tint: 'var(--red)' })}
+      ${navRow('routine', { label: 'Режим дня', value: `${st.wakeWd}–${st.sleepWd}`, glyph: 'sun', tint: 'var(--orange)' })}
+      ${navRow('reminders', { label: 'Напоминания', value: st.checkin.enabled ? st.checkin.time : 'Выкл', glyph: 'bell', tint: 'var(--red)' })}
     </div>
 
     <div class="group-title">Приложение</div>
     <div class="card list-group">
-      ${navRow('theme', { label: 'Оформление', value: THEME_LABEL[st.theme] || THEME_LABEL.system, emoji: '◐', tint: 'var(--gray)' })}
-      ${navRow('privacy', { label: 'Конфиденциальность', value: protectedOn() ? 'вкл' : 'выкл', emoji: '🔒', tint: 'var(--blue)' })}
-      ${navRow('archive', { label: 'Архив привычек', value: archived ? String(archived) : 'пусто', emoji: '🗄', tint: 'var(--gray)' })}
-      ${navRow('data', { label: 'Данные', value: syncStatusShort(), emoji: '☁︎', tint: 'var(--blue)' })}
+      ${navRow('theme', { label: 'Оформление', value: THEME_LABEL[st.theme] || THEME_LABEL.system, glyph: 'contrast', tint: 'var(--gray)' })}
+      ${navRow('privacy', { label: 'Конфиденциальность', value: protectedOn() ? 'Вкл' : 'Выкл', glyph: 'lock', tint: 'var(--blue)' })}
+      ${navRow('archive', { label: 'Архив привычек', value: archived ? String(archived) : 'Пусто', glyph: 'archive', tint: 'var(--gray)' })}
+      ${navRow('data', { label: 'Данные', value: syncStatusShort(), glyph: 'cloud', tint: 'var(--blue)' })}
     </div>
     <p class="footnote">My Habits · данные принадлежат только тебе</p>
   `;
@@ -2182,9 +2187,9 @@ function qadaSettingsSection() {
         <button class="btn btn-secondary" id="qada-calc">Посчитать</button>
       </div>
       <div class="qada-grid">${QADA_KEYS.map((k) => `<label><span>${QADA_NAMES[k]}</span><input class="field" type="number" min="0" inputmode="numeric" data-set="qada.old.${k}" data-num value="${Number(q.old?.[k]) || 0}"></label>`).join('')}</div>
-      <label class="switch-row mt"><span>Цель: восполнять в день</span>
+      <label class="switch-row mt"><span>Цель в день</span>
         <select class="field compact" data-set="qada.perDay" data-num>${[0, 1, 2, 3, 4, 5, 6, 10].map((n) => `<option value="${n}" ${Number(q.perDay) === n ? 'selected' : ''}>${n ? `${n} ${plural(n, ['намаз', 'намаза', 'намазов'])}` : 'без цели'}</option>`).join('')}</select></label>
-      <p class="hint">Калькулятор считает по одному намазу каждого вида за каждый день, включая Витр (ваджиб), дальше любое число можно поправить. Осталось восполнить из старого долга: <b>${d.oldLeft}</b>.</p>
+      <p class="hint">По одному намазу каждого вида за день, включая Витр (ваджиб); числа можно поправить. Осталось из старого долга: <b>${d.oldLeft}</b>.</p>
     </div>
     <div class="group-title">Запретное время</div>
     <div class="card pad">
