@@ -237,6 +237,7 @@ a { color: inherit; text-decoration: none; }
   padding: 18px;
 }
 .summary-pct { font-size: var(--ios-title-1); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: 1; text-box: trim-both cap alphabetic; }
+.summary-pct.is-long { font-size: var(--ios-title-2); letter-spacing: -0.04em; }
 .summary-pct small { font-size: var(--ios-footnote); font-weight: 600; color: var(--label-2); margin-left: 1px; }
 .summary-title { font-size: var(--ios-title-3); font-weight: 600; letter-spacing: var(--ios-title-3-ls); line-height: var(--ios-title-3-lh); }
 .summary-sub { color: var(--label-2); font-size: var(--ios-subheadline); margin-top: 3px; line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }

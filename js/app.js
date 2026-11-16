@@ -158,7 +158,7 @@ function viewToday() {
   const allDone = s.total > 0 && s.done === s.total;
   const summary = habits.length
     ? `<section class="card summary">
-        ${ring(s.ratio ?? 0, { size: 92, stroke: 10, key: 'summary', color: 'var(--green)', inner: `<span class="summary-pct">${s.total ? Math.round((s.ratio || 0) * 100) : 0}<small>%</small></span>` })}
+        ${ring(s.ratio ?? 0, { size: 92, stroke: 10, key: 'summary', color: 'var(--green)', inner: summaryPct(s.total ? Math.round((s.ratio || 0) * 100) : 0) })}
         <div class="summary-text">
           <div class="summary-title">${allDone ? 'Все цели выполнены' : s.total ? `Выполнено ${s.done} из ${s.total}` : 'На этот день ничего не запланировано'}</div>
           <div class="summary-sub">${allDone ? 'Отличная работа — так держать 🎉' : s.total ? summaryRest(s) : 'Можно отдохнуть'}</div>
@@ -398,6 +398,9 @@ function tapStage(h, day) {
 }
 
 const STATUS_CLASS = { ontime: 'is-done', late: 'is-done', qada: 'is-qada', missed: 'is-missed' };
+
+/** Процент в кольце сводки: «100» — три цифры, шрифт на ступень меньше, чтобы не касаться кольца. */
+const summaryPct = (pct) => `<span class="summary-pct ${pct >= 100 ? 'is-long' : ''}">${pct}<small>%</small></span>`;
 
 /** Подпись под «Выполнено N из M»: объясняет процент кольца, если часть привычек начата, но не закрыта. */
 function summaryRest(s) {
