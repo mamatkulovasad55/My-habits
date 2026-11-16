@@ -189,7 +189,7 @@ export const METRICS = {
       const r = runReach(habitRunSteps(h), levels);
       for (const [L, k] of Object.entries(r.reached)) if (!reached[L] || k < reached[L]) reached[L] = k;
     }
-    // прогресс — как «Лучшая текущая серия» в «Статистике»
+    // прогресс — как «Серия сейчас» в «Статистике»
     let current = 0;
     for (const h of habitsActive()) {
       const c = currentStreak(h);

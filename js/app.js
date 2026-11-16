@@ -1573,7 +1573,7 @@ function viewStats() {
       <div class="tile"><div class="tile-label">Сегодня</div><div class="tile-val" style="color:var(--green)">${pct(td.ratio)}</div></div>
       <div class="tile"><div class="tile-label">7 дней</div><div class="tile-val">${pct(rangeRate(7))}</div></div>
       <div class="tile"><div class="tile-label">30 дней</div><div class="tile-val">${pct(rangeRate(30))}</div></div>
-      <div class="tile"><div class="tile-label">Лучшая текущая серия</div><div class="tile-val" style="color:var(--orange)">${bestCur}<small> ${plural(bestCur, DAY_FORMS)}</small></div></div>
+      <div class="tile"><div class="tile-label">Серия сейчас</div><div class="tile-val" style="color:var(--orange)">${bestCur}<small> ${plural(bestCur, DAY_FORMS)}</small></div></div>
     </div>
     <div class="group-title">Последние 14 дней</div>
     <div class="card pad">${barChart(bars, { color: 'var(--green)' })}</div>

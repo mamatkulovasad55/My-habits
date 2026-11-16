@@ -68,7 +68,7 @@ assert.equal(earned['abstain-days-7'], '2026-10-08', 'прошлая попыт�
 assert.equal(p['abstain-days'].current, 2, 'текущая попытка с 14-го');
 console.log('✓ даты задним числом: фарды (с «позже»), Джума, каза (с отменой), серия привычки, воздержание');
 
-// Сверка со «Статистикой»: серии с датами = bestStreak / currentStreak, прогресс = «Лучшая текущая серия»
+// Сверка со «Статистикой»: серии с датами = bestStreak / currentStreak, прогресс = «Серия сейчас»
 const runOf = (steps) => {
   let run = 0;
   let best = 0;
@@ -95,7 +95,7 @@ const rh = habitsAll().find((h) => h.id === 'read');
 assert.equal(runOf(habitRunSteps(rh)).best, bestStreak(rh).value * 7);
 const p2 = computeAchievements();
 const cur = Math.max(...habitsAll().filter((h) => !h.archived).map((h) => { const c = currentStreak(h); return c.unit === 'weeks' ? c.value * 7 : c.value; }));
-assert.equal(p2['habit-streak'].current, cur, 'прогресс = «Лучшая текущая серия»');
+assert.equal(p2['habit-streak'].current, cur, 'прогресс = «Серия сейчас»');
 console.log('✓ серии совпадают с «Статистикой» (рекорд, текущая, недельная привычка)');
 
 // Выдача и сохранность
