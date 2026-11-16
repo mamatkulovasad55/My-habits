@@ -17,3 +17,12 @@ DATA_OWNER = "__DATA_OWNER__"
 DATA_REPO = "my-habits-data"
 DATA_PATH = "data.json"
 APP_URL = "__APP_URL__"
+
+# Код раздела «Воздержание»: Durable Object со строго согласованным хранилищем (SQLite — доступно на бесплатном тарифе)
+[[durable_objects.bindings]]
+name = "LOCK"
+class_name = "LockStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LockStore"]
