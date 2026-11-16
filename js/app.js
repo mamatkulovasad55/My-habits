@@ -1276,7 +1276,6 @@ function viewAbstain() {
       return `<article class="acard" style="--c:${a.color}" data-action="open-abstain" data-id="${a.id}">
         <div class="acard-top">
           <div class="acard-title"><span class="emoji-chip">${esc(a.emoji)}</span><span>${esc(a.name)}</span></div>
-          <div class="acard-best">Рекорд · ${fmtDuration(abstainBest(a))}</div>
         </div>
         <div class="atimer" data-live-abs="${a.id}">${timerHTML(el)}</div>
         <div class="milestone">
@@ -1287,7 +1286,6 @@ function viewAbstain() {
           <button class="btn ${clean ? 'btn-tinted' : 'btn-primary'}" data-action="clean-today" data-id="${a.id}">${clean ? `${icon.check(17)} Чистый день` : 'Отметить чистый день'}</button>
           <button class="btn btn-ghost-danger" data-action="relapse" data-id="${a.id}">Срыв</button>
         </div>
-        <div class="acard-foot">${(a.cleanDays || []).length} ${plural((a.cleanDays || []).length, ['чистый день', 'чистых дня', 'чистых дней'])} · ${(a.attempts || []).length + 1}-я попытка</div>
       </article>`;
     })
     .join('');

@@ -420,7 +420,7 @@ a { color: inherit; text-decoration: none; }
 
 .acard {
   position: relative;
-  padding: 18px 18px 14px;
+  padding: 18px;
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -437,10 +437,9 @@ a { color: inherit; text-decoration: none; }
 .acard:active { transform: scale(0.99); }
 .acard > * { position: relative; }
 
-.acard-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.acard-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .acard-title { display: flex; align-items: center; gap: 10px; font-size: var(--ios-headline); font-weight: 600; letter-spacing: var(--ios-headline-ls); min-width: 0; line-height: var(--ios-headline-lh); }
 .acard-title span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.acard-best { font-size: var(--ios-footnote); color: var(--label-2); white-space: nowrap; font-weight: 500; line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 
 .emoji-chip {
   flex: none;
@@ -477,7 +476,6 @@ a { color: inherit; text-decoration: none; }
 
 .acard-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 16px; }
 .acard-actions .btn { min-height: 44px; font-size: var(--ios-callout); letter-spacing: var(--ios-callout-ls); }
-.acard-foot { margin-top: 10px; font-size: var(--ios-footnote); color: var(--label-2); text-align: center; line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 
 /* ---------- Плитки ---------- */
 
