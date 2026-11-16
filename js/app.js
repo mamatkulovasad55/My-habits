@@ -348,7 +348,7 @@ function openCheckin() {
           <div class="card list-group">${left.length
             ? left.map((h) => `<button class="row" data-open="${h.id}"><span class="emoji-chip" style="--c:${h.color}">${esc(h.emoji)}</span><div class="row-main"><b>${esc(h.name)}</b><span class="muted">${h.type === 'check' && !hasStages(h) ? 'не отмечено' : `${fmtNum(valueOf(h, key))} из ${goalOf(h, key)}${hasStages(h) && h.type === 'check' ? ' этапов' : ''}`}</span></div>${icon.chevronR(18)}</button>`).join('')
             : `<div class="row static"><span>Всё выполнено — отличный день! 🎉</span></div>`}</div>
-          ${abst.length ? `<div class="group-title">Воздержание сегодня</div>
+          ${abst.length ? `<div class="group-title">Детокс сегодня</div>
           <div class="card list-group">${abst.map((a) => {
             const clean = isCleanDay(a, key);
             return `<div class="row static"><span class="emoji-chip" style="--c:${a.color}">${esc(a.emoji)}</span><div class="row-main"><b>${esc(a.name)}</b><span class="muted">${esc(fmtDuration(abstainElapsed(a)))} без срыва</span></div><button class="pill ${clean ? 'is-on' : ''}" style="--c:${a.color}" data-clean="${a.id}">${clean ? '✓ Чистый' : 'Чистый день'}</button></div>`;
@@ -1294,7 +1294,7 @@ function viewAbstain() {
 
   return `
     <header class="page-head">
-      <div><div class="eyebrow">Сила воли</div><h1>Воздержание</h1></div>
+      <div><h1>Детокс</h1></div>
       <div class="head-actions"><button class="icon-btn" data-action="add-abstain" aria-label="Добавить">${icon.plus(22)}</button></div>
     </header>
     ${cards ? `<section class="stack">${cards}</section>` : `
@@ -1363,7 +1363,7 @@ function openAbstainEditor(existing) {
           <label class="name-cap" for="name-abst">Название</label>
           <input class="name-input" id="name-abst" data-e="name" placeholder="Например, курение" value="${esc(f.name)}" maxlength="40" autocomplete="off">
         </div>
-        <div class="group-title">Начало воздержания</div>
+        <div class="group-title">Начало</div>
         <div class="card pad">
           <input class="field" type="datetime-local" data-e="start" value="${toLocalInput(f.startedAt)}" max="${toLocalInput(Date.now())}">
           <p class="hint">Если ты уже держишься какое-то время — укажи, с какого момента.</p>
@@ -1587,7 +1587,7 @@ function viewStats() {
     ${hoursOverview()}
     <div class="group-title">Привычки · за 30 дней</div>
     <div class="card list-group">${habitRows}</div>` : ''}
-    ${abst.length ? `<div class="group-title">Воздержание</div><div class="card list-group">${abstRows}</div>` : ''}
+    ${abst.length ? `<div class="group-title">Детокс</div><div class="card list-group">${abstRows}</div>` : ''}
     ${locked && abstAny.length ? `<a class="card pad lock-plate" href="#abstain"><span>🔒</span><span><b>Раздел защищён</b><br><span class="muted small">Открыть</span></span>${icon.chevronR(16)}</a>` : ''}
     ${dhikrStatsSection()}
   `;
@@ -2355,7 +2355,7 @@ function mountProfile() {
   q('wipe').onclick = () =>
     confirmSheet({
       title: 'Удалить все данные?',
-      message: 'Привычки, воздержания, вся история, зикры, заметки, ниййа и достижения будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
+      message: 'Привычки, детокс, вся история, зикры, заметки, ниййа и достижения будут удалены — в том числе в репозитории. Настройки (город, время намаза, остаток старого долга каза) останутся. Сначала можно сделать экспорт.',
       confirm: 'Удалить всё',
       destructive: true,
       onConfirm: () => {
@@ -2515,7 +2515,7 @@ function lockMessage() {
 }
 
 function lockScreen() {
-  const head = `<header class="page-head"><div><div class="eyebrow">Сила воли</div><h1>Воздержание</h1></div></header>`;
+  const head = `<header class="page-head"><div><h1>Детокс</h1></div></header>`;
   if (lockUi.hasCode === false) {
     return `${head}<div class="lock-screen">
       <div class="lock-icon">🔑</div><h2>Код сброшен</h2>
@@ -2608,7 +2608,7 @@ function requireAuth(title, onOk) {
     render: () => `
       <header class="sheet-header"><button class="link-btn" data-a="cancel">Отмена</button><strong>${esc(title)}</strong><span></span></header>
       <div class="sheet-body"><div class="lock-sheet">
-        <p class="lock-msg ${st.err ? 'is-err' : ''}">${st.wait() ? `Слишком много попыток. Повтори через ${fmtWait(st.wait())}` : st.err ? esc(st.err) : 'Введи код раздела «Воздержание»'}</p>
+        <p class="lock-msg ${st.err ? 'is-err' : ''}">${st.wait() ? `Слишком много попыток. Повтори через ${fmtWait(st.wait())}` : st.err ? esc(st.err) : 'Введи код раздела «Детокс»'}</p>
         ${pinPadHTML(st.pin, bioEnabled() ? 'data-a="bio"' : '')}
       </div></div>`,
     mount: (api) => {
@@ -2725,7 +2725,7 @@ function privacySection() {
   const b = bio();
   const on = protectedOn();
   return `<div class="card pad">
-      <label class="switch-row"><span><b>Защитить «Воздержание»</b><br><span class="muted small">Раздел открывается по коду${b.available ? ` или ${esc(bioLabel())}` : ''}</span></span><input type="checkbox" class="switch" data-priv="enabled" ${on ? 'checked' : ''}></label>
+      <label class="switch-row"><span><b>Защитить «Детокс»</b><br><span class="muted small">Раздел открывается по коду${b.available ? ` или ${esc(bioLabel())}` : ''}</span></span><input type="checkbox" class="switch" data-priv="enabled" ${on ? 'checked' : ''}></label>
     </div>
     <p class="hint">Пока раздел закрыт, его не видно на «Сегодня», в «Статистике» и в чек-ине, а бот пишет без названий. Код хранится только на сервере. Данные в репозитории не шифруются — это защита от чужих глаз на телефоне.</p>
     ${on ? `
@@ -2752,7 +2752,7 @@ function mountPrivacy() {
       if (s.offline) return toast('Нужна сеть: код хранится на сервере');
       openSetCode({
         needCurrent: s.hasCode === true,
-        title: 'Код для «Воздержания»',
+        title: 'Код для «Детокса»',
         onDone: () => {
           setSetting('privacy.enabled', true);
           lockNow(); // включили — раздел сразу закрыт везде

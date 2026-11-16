@@ -97,7 +97,7 @@ export function bioRequestAccess() {
   if (!bm) return Promise.resolve(false);
   return new Promise((resolve) => {
     try {
-      bm.requestAccess({ reason: 'Чтобы открывать раздел «Воздержание»' }, (granted) => {
+      bm.requestAccess({ reason: 'Чтобы открывать раздел «Детокс»' }, (granted) => {
         bioState = { ...bioState, granted: Boolean(granted), requested: true };
         resolve(Boolean(granted));
       });
@@ -113,7 +113,7 @@ export function bioAuthenticate() {
   if (!bm || !bioEnabled()) return Promise.resolve(false);
   return new Promise((resolve) => {
     try {
-      bm.authenticate({ reason: 'Открыть раздел «Воздержание»' }, (ok) => resolve(Boolean(ok)));
+      bm.authenticate({ reason: 'Открыть раздел «Детокс»' }, (ok) => resolve(Boolean(ok)));
     } catch {
       resolve(false);
     }
