@@ -102,7 +102,8 @@ Telegram ── Mini App (GitHub Pages) ──► Cloudflare Worker ──► my
 ## Структура
 ```
 index.html            оболочка и нижняя панель вкладок
-css/styles.css        стили (iOS-токены, светлая и тёмная тема)
+css/tokens.css        токены iOS 27 из Figma: цвета (светлая/тёмная), шрифты, отступы, радиусы
+css/styles.css        стили; цвета и размеры только через var(--…) из tokens.css
 js/app.js             экраны и обработчики
 js/logic.js           расписания, серии, проценты, вехи, достижения
 js/store.js           данные, localStorage, слияние версий
