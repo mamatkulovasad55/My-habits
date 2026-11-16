@@ -131,19 +131,20 @@ a { color: inherit; text-decoration: none; }
 
 .page-head h1 {
   margin: 0;
-  font-size: 34px;
-  line-height: 1.12;
+  font-size: var(--ios-large-title);
+  line-height: var(--ios-large-title-lh);
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: var(--ios-large-title-ls);
 }
 
 .eyebrow {
-  font-size: 13px;
+  font-size: var(--ios-footnote);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
   color: var(--label-2);
   margin-bottom: 2px;
+  line-height: var(--ios-footnote-lh);
 }
 
 .eyebrow-btn { text-align: left; padding: 2px 0; }
@@ -193,8 +194,8 @@ a { color: inherit; text-decoration: none; }
   border-radius: 14px;
   transition: background 0.2s;
 }
-.day-letter { font-size: 12px; font-weight: 600; color: var(--label-2); }
-.day-num { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.day-letter { font-size: var(--ios-caption-1); font-weight: 600; color: var(--label-2); line-height: var(--ios-caption-1-lh); }
+.day-num { font-size: var(--ios-subheadline); font-weight: 600; font-variant-numeric: tabular-nums; }
 .day.is-today .day-letter { color: var(--accent); }
 .day.is-selected { background: var(--card); box-shadow: var(--shadow); }
 .day.is-selected .day-num { color: var(--accent); }
@@ -230,18 +231,19 @@ a { color: inherit; text-decoration: none; }
   gap: 18px;
   padding: 18px;
 }
-.summary-pct { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
-.summary-pct small { font-size: 14px; font-weight: 600; color: var(--label-2); margin-left: 1px; }
-.summary-title { font-size: 19px; font-weight: 650; letter-spacing: -0.02em; }
-.summary-sub { color: var(--label-2); font-size: 15px; margin-top: 3px; }
+.summary-pct { font-size: var(--ios-title-1); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; line-height: var(--ios-title-1-lh); }
+.summary-pct small { font-size: var(--ios-footnote); font-weight: 600; color: var(--label-2); margin-left: 1px; }
+.summary-title { font-size: var(--ios-title-3); font-weight: 600; letter-spacing: var(--ios-title-3-ls); line-height: var(--ios-title-3-lh); }
+.summary-sub { color: var(--label-2); font-size: var(--ios-subheadline); margin-top: 3px; line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
 
 .section-title, .group-title {
   margin: 22px 4px 8px;
-  font-size: 13px;
+  font-size: var(--ios-footnote);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
   color: var(--label-2);
+  line-height: var(--ios-footnote-lh);
 }
 
 /* ---------- Список привычек ---------- */
@@ -265,19 +267,25 @@ a { color: inherit; text-decoration: none; }
 
 .hmain { flex: 1; min-width: 0; }
 .hname {
-  font-size: 17px;
+  font-size: var(--ios-headline);
   font-weight: 600;
-  letter-spacing: -0.02em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  letter-spacing: var(--ios-headline-ls);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: var(--ios-headline-lh);
 }
 .hcard.is-done .hname { color: var(--label-2); }
 .hsub {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: var(--ios-subheadline);
   color: var(--label-2);
   font-variant-numeric: tabular-nums;
+  line-height: var(--ios-subheadline-lh);
+  letter-spacing: var(--ios-subheadline-ls);
 }
-.hsub .dot { margin: 0 6px; opacity: 0.6; }
+.hsub .dot { margin-left: 6px; opacity: 0.6; }
+.hsub .seg { white-space: nowrap; }
 .hsub .streak { vertical-align: top; }
 .streak { display: inline-flex; align-items: center; gap: 3px; color: var(--orange); font-weight: 600; }
 .strength { display: inline-flex; align-items: center; gap: 5px; color: var(--c); font-weight: 600; vertical-align: top; }
@@ -319,12 +327,15 @@ a { color: inherit; text-decoration: none; }
 .abst-strip::-webkit-scrollbar { display: none; }
 .abst-chip {
   flex: none;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 32px;
   padding: 0 12px 0 10px;
   border-radius: 16px;
   background: color-mix(in srgb, var(--c) 14%, var(--card));
-  font-size: 14px;
+  font-size: var(--ios-subheadline);
+  letter-spacing: var(--ios-subheadline-ls);
 }
 .abst-chip b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--c); filter: brightness(0.85); }
 :root[data-theme="dark"] .abst-chip b { filter: none; }
@@ -345,8 +356,8 @@ a { color: inherit; text-decoration: none; }
   background: var(--card);
   box-shadow: var(--shadow);
 }
-.empty h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; }
-.empty p { margin: 0 auto 22px; max-width: 320px; color: var(--label-2); font-size: 15px; }
+.empty h2 { margin: 0 0 6px; font-size: var(--ios-title-2); letter-spacing: var(--ios-title-2-ls); line-height: var(--ios-title-2-lh); }
+.empty p { margin: 0 auto 22px; max-width: 320px; color: var(--label-2); font-size: var(--ios-subheadline); line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
 
 /* ---------- Кнопки ---------- */
 
@@ -372,10 +383,10 @@ a { color: inherit; text-decoration: none; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 .btn-row .btn { flex: 1 1 auto; }
 
-.link-btn { color: var(--accent); font-size: 17px; padding: 6px 2px; }
+.link-btn { color: var(--accent); font-size: var(--ios-body); padding: 6px 2px; letter-spacing: var(--ios-body-ls); }
 .link-btn.strong { font-weight: 600; }
 .link-btn:disabled { color: var(--label-3); }
-.link-btn.danger { color: var(--red); font-size: 15px; }
+.link-btn.danger { color: var(--red); font-size: var(--ios-subheadline); }
 .mt { margin-top: 12px; }
 
 .round-btn {
@@ -685,7 +696,7 @@ a { color: inherit; text-decoration: none; }
 .form-grid label { display: flex; flex-direction: column; gap: 6px; }
 .form-grid label:only-child { grid-column: 1 / -1; }
 .form-grid label > span { font-size: 13px; font-weight: 500; color: var(--label-2); padding-left: 4px; }
-.hint { margin: 12px 4px 0; font-size: 13px; color: var(--label-2); line-height: 1.4; }
+.hint { margin: 12px 4px 0; font-size: var(--ios-footnote); color: var(--label-2); line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 
 .hero-input {
   display: flex; flex-direction: column; align-items: center; gap: 14px;
@@ -923,7 +934,7 @@ select.field.compact { padding-right: 30px; }
 
 .small { font-size: 13px; }
 .center { text-align: center; }
-.link-btn.small { font-size: 15px; }
+.link-btn.small { font-size: var(--ios-subheadline); }
 
 /* точки этапов на карточке */
 .stage-dots { display: flex; gap: 4px; margin-top: 6px; }
@@ -939,8 +950,8 @@ select.field.compact { padding-right: 30px; }
 .list-tools { display: flex; justify-content: space-between; gap: 12px; padding: 10px 4px 0; }
 
 .banner { border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); }
-.banner-title { font-weight: 650; font-size: 17px; letter-spacing: -0.02em; }
-.banner p { margin: 6px 0 0; color: var(--label-2); font-size: 15px; }
+.banner-title { font-weight: 600; font-size: var(--ios-headline); letter-spacing: var(--ios-headline-ls); line-height: var(--ios-headline-lh); }
+.banner p { margin: 6px 0 0; color: var(--label-2); font-size: var(--ios-subheadline); line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
 
 .note-card { padding: 4px 6px; }
 .note-input {
@@ -949,9 +960,10 @@ select.field.compact { padding-right: 30px; }
   resize: none;
   background: transparent;
   padding: 10px;
-  font-size: 16px;
-  line-height: 1.4;
+  font-size: var(--ios-body);
+  line-height: var(--ios-body-lh);
   outline: none;
+  letter-spacing: var(--ios-body-ls);
 }
 .note-input::placeholder { color: var(--label-3); }
 .sheet .note-input { background: var(--fill); border-radius: 12px; }
@@ -1114,8 +1126,8 @@ body.is-gate .tabbar { display: none; }
 .stage-list.is-soft .stage-row.st-missed .row-main .muted { color: var(--label-2); opacity: 1; }
 
 /* Хиджрийский календарь */
-.hijri-line { margin-top: 2px; font-size: 15px; color: var(--label-2); }
-.hijri-line .hijri-eve { color: var(--accent); }
+.hijri-line { margin-top: 2px; font-size: var(--ios-subheadline); color: var(--label-2); line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
+.hijri-line .hijri-eve { color: var(--accent); white-space: nowrap; }
 .hijri-today { font-size: 17px; }
 .chips.hijri-days { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 .chips.hijri-days .chip { min-width: 0; padding: 8px 0; text-align: center; }
