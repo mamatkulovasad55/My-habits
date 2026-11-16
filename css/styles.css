@@ -362,13 +362,16 @@ a { color: inherit; text-decoration: none; }
 /* ---------- Кнопки ---------- */
 
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 46px;
   padding: 0 20px;
   border-radius: 14px;
-  font-size: 17px;
+  font-size: var(--ios-headline);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--ios-headline-ls);
   transition: transform 0.15s var(--ease), opacity 0.2s, background 0.25s;
 }
 .btn:active { transform: scale(0.97); }
@@ -425,9 +428,9 @@ a { color: inherit; text-decoration: none; }
 .acard > * { position: relative; }
 
 .acard-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.acard-title { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; min-width: 0; }
+.acard-title { display: flex; align-items: center; gap: 10px; font-size: var(--ios-headline); font-weight: 600; letter-spacing: var(--ios-headline-ls); min-width: 0; line-height: var(--ios-headline-lh); }
 .acard-title span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.acard-best { font-size: 13px; color: var(--label-2); white-space: nowrap; font-weight: 500; }
+.acard-best { font-size: var(--ios-footnote); color: var(--label-2); white-space: nowrap; font-weight: 500; line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 
 .emoji-chip {
   flex: none;
@@ -449,7 +452,7 @@ a { color: inherit; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 .atimer small {
-  font-size: 13px;
+  font-size: var(--ios-footnote);
   font-weight: 600;
   letter-spacing: 0;
   color: var(--label-2);
@@ -458,13 +461,13 @@ a { color: inherit; text-decoration: none; }
 .atimer > span:first-child { color: var(--c); }
 .atimer-lg { justify-content: center; font-size: clamp(24px, 7.6vw, 34px); margin: 10px 0 6px; }
 
-.milestone-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--label-2); margin-bottom: 6px; font-weight: 500; }
+.milestone-row { display: flex; justify-content: space-between; font-size: var(--ios-footnote); color: var(--label-2); margin-bottom: 6px; font-weight: 500; line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 .progress { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .progress > div { height: 100%; border-radius: 3px; background: var(--c); transition: width 0.6s var(--ease); }
 
 .acard-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin-top: 16px; }
-.acard-actions .btn { min-height: 44px; font-size: 16px; }
-.acard-foot { margin-top: 10px; font-size: 13px; color: var(--label-2); text-align: center; }
+.acard-actions .btn { min-height: 44px; font-size: var(--ios-callout); letter-spacing: var(--ios-callout-ls); }
+.acard-foot { margin-top: 10px; font-size: var(--ios-footnote); color: var(--label-2); text-align: center; line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 
 /* ---------- Плитки ---------- */
 
@@ -476,16 +479,19 @@ a { color: inherit; text-decoration: none; }
   padding: 14px 16px;
   min-width: 0;
 }
-.tile-label { font-size: 13px; font-weight: 500; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-label { font-size: var(--ios-footnote); font-weight: 500; color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 .tile-val {
   margin-top: 4px;
-  font-size: 26px;
+  font-size: var(--ios-title-1);
   font-weight: 700;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: var(--ios-title-1-lh);
 }
-.tile-val small { font-size: 14px; font-weight: 600; color: var(--label-2); letter-spacing: 0; }
+.tile-val small { font-size: var(--ios-footnote); font-weight: 600; color: var(--label-2); letter-spacing: 0; }
 
 /* ---------- Сгруппированные списки ---------- */
 
@@ -507,14 +513,18 @@ a { color: inherit; text-decoration: none; }
 .row.static { cursor: default; }
 .row.is-danger, .row.is-danger svg { color: var(--red); }
 .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.row-main b { font-weight: 600; font-size: 16px; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-main .muted { font-size: 13px; display: inline-flex; align-items: center; gap: 3px; }
+.row-main b { font-weight: 600; font-size: var(--ios-body); letter-spacing: var(--ios-body-ls); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-main .muted { font-size: var(--ios-footnote); display: inline-flex; align-items: center; gap: 3px; line-height: var(--ios-footnote-lh); letter-spacing: var(--ios-footnote-ls); }
 .row-main .muted svg { color: var(--orange); }
-.row-main .note { font-size: 14px; color: var(--label-2); font-style: italic; margin-top: 2px; }
+.row-main .note { font-size: var(--ios-subheadline); color: var(--label-2); font-style: italic; margin-top: 2px; line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
 .row-val { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--label-2); font-size: 15px; white-space: nowrap; }
 .badge {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
-  padding: 3px 7px; border-radius: 6px;
+  font-size: var(--ios-caption-2);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 7px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--orange) 16%, transparent);
   color: var(--orange);
 }
@@ -638,7 +648,7 @@ a { color: inherit; text-decoration: none; }
 }
 .sheet-header > :first-child { justify-self: start; }
 .sheet-header > :last-child { justify-self: end; }
-.sheet-header strong { font-size: 17px; font-weight: 600; }
+.sheet-header strong { font-size: var(--ios-headline); font-weight: 600; line-height: var(--ios-headline-lh); letter-spacing: var(--ios-headline-ls); }
 
 .sheet-body {
   flex: 1;
@@ -816,14 +826,17 @@ a { color: inherit; text-decoration: none; }
 
 .milestones { display: flex; flex-wrap: wrap; gap: 8px; }
 .ms {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 30px;
   padding: 0 12px 0 6px;
   border-radius: 15px;
   background: var(--fill);
-  font-size: 14px;
+  font-size: var(--ios-subheadline);
   font-weight: 500;
   color: var(--label-2);
+  letter-spacing: var(--ios-subheadline-ls);
 }
 .ms-dot { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--fill-2); color: #fff; }
 .ms.is-now { background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--label); }
@@ -832,9 +845,9 @@ a { color: inherit; text-decoration: none; }
 .ms.is-ever .ms-dot { background: transparent; color: var(--c); }
 
 .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.cal-nav strong { font-size: 17px; font-weight: 600; }
+.cal-nav strong { font-size: var(--ios-headline); font-weight: 600; line-height: var(--ios-headline-lh); letter-spacing: var(--ios-headline-ls); }
 .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.cal-h { text-align: center; font-size: 12px; font-weight: 600; color: var(--label-3); padding-bottom: 4px; }
+.cal-h { text-align: center; font-size: var(--ios-caption-1); font-weight: 600; color: var(--label-3); padding-bottom: 4px; }
 .cal-d {
   aspect-ratio: 1;
   max-height: 44px;
@@ -852,7 +865,7 @@ a { color: inherit; text-decoration: none; }
 .cal-d.is-today { color: var(--accent); font-weight: 700; }
 .cal-d.is-clean { background: var(--c); color: #fff; font-weight: 600; }
 .cal-d.is-relapse { box-shadow: inset 0 0 0 2px var(--red); }
-.legend { display: flex; gap: 16px; justify-content: center; margin-top: 12px; font-size: 12px; color: var(--label-2); }
+.legend { display: flex; gap: 16px; justify-content: center; margin-top: 12px; font-size: var(--ios-caption-1); color: var(--label-2); line-height: var(--ios-caption-1-lh); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
 .lg-clean { background: var(--c); }
@@ -1053,7 +1066,7 @@ select.field.compact { padding-right: 30px; }
 /* намаз */
 .inline-fields { display: flex; gap: 8px; }
 .inline-fields select { flex: 1; }
-.inline-fields .btn { min-height: 44px; padding: 0 14px; font-size: 15px; white-space: nowrap; }
+.inline-fields .btn { min-height: 44px; padding: 0 14px; font-size: var(--ios-subheadline); white-space: nowrap; }
 .prayer-table { margin-top: 12px; }
 .prayer-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 14px; padding: 7px 0; }
 .prayer-row + .prayer-row { border-top: 0.5px solid var(--sep); }
@@ -1112,7 +1125,7 @@ body.is-gate .tabbar { display: none; }
 .qada-goal .progress > div { background: var(--orange); }
 .calc { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; color: var(--label-2); }
 .calc .unit-field .field { width: 70px; }
-.calc .btn { min-height: 40px; padding: 0 14px; font-size: 15px; }
+.calc .btn { min-height: 40px; padding: 0 14px; font-size: var(--ios-subheadline); }
 .qada-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
 .qada-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--label-2); }
 .qada-grid .field { text-align: center; padding: 8px; }

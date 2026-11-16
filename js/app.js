@@ -1450,7 +1450,7 @@ function openAbstainDetail(id) {
             <p class="muted">без срыва с ${esc(fmtDateTime(a.startedAt))}</p>
           </div>
           <div class="tiles">
-            <div class="tile"><div class="tile-label">Рекорд</div><div class="tile-val" style="color:${a.color}">${esc(fmtDuration(best))}</div></div>
+            <div class="tile"><div class="tile-label">Рекорд</div><div class="tile-val" style="color:${a.color}">${esc(fmtDuration(best)).replace(/([^\d\s]+)/g, '<small>$1</small>')}</div></div>
             <div class="tile"><div class="tile-label">Чистых дней</div><div class="tile-val">${(a.cleanDays || []).length}</div></div>
             <div class="tile"><div class="tile-label">Попытка</div><div class="tile-val">${(a.attempts || []).length + 1}-я</div></div>
             <div class="tile"><div class="tile-label">Срывов</div><div class="tile-val">${(a.attempts || []).length}</div></div>
