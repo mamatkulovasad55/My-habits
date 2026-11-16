@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v29';
+const VERSION = 'v30';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
@@ -25,6 +25,7 @@ const ASSETS = [
   './js/calibrate.js',
   './js/hijri.js',
   './js/dhikr.js',
+  './js/backup.js',
   './data/dhikr.json',
   './icons/icon.svg',
   './icons/icon-192.png',

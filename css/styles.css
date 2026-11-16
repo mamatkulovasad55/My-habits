@@ -1442,3 +1442,15 @@ body:has(.storage-warn) .view { padding-bottom: calc(var(--tabbar-h) + var(--saf
 .ach-progress { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; }
 .ach-progress .progress { height: 5px; --c: var(--orange); }
 .ach-progress span { font-size: var(--ios-caption-1); color: var(--label-3); font-variant-numeric: tabular-nums; letter-spacing: var(--ios-caption-1-ls); }
+
+/* ---------- Данные: опасная зона, подтверждение словом, превью импорта ---------- */
+.group-title.danger-title { color: var(--ios-red); }
+.row.switch-row.is-off .row-main > span:first-child { color: var(--ios-label-secondary); }
+.row.switch-row .row-main .muted { display: block; }
+.confirm .danger-list { display: block; text-align: left; }
+.danger-word { display: flex; flex-direction: column; gap: var(--ios-space-xs); margin-bottom: var(--ios-space-m); text-align: left; font-size: var(--ios-footnote); color: var(--ios-label-secondary); }
+.danger-word b { color: var(--ios-label-primary); letter-spacing: 0.04em; }
+.confirm .danger-word input.field { text-align: center; text-transform: uppercase; letter-spacing: 0.08em; }
+.import-preview { margin: 0 0 var(--ios-space-m); text-align: left; }
+.import-preview .row { min-height: 44px; }
+.import-preview .row .muted { text-align: right; font-size: var(--ios-subheadline); }

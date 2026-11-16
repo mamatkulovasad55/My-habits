@@ -60,6 +60,8 @@ async function openApp(b, scheme, { locked = false } = {}) {
   let remote = seed();
   if (locked) remote.settings.privacy = { ...remote.settings.privacy, enabled: true };
   const errors = [];
+  const backups = [];
+  let backupFails = false;
   await ctx.route('https://telegram.org/**', (r) => r.fulfill({ body: '', contentType: 'text/javascript' }));
   await ctx.route(`${WORKER}/**`, async (r) => {
     const path = new URL(r.request().url()).pathname;
@@ -69,6 +71,11 @@ async function openApp(b, scheme, { locked = false } = {}) {
       return r.fulfill({ json: { data: remote } });
     }
     if (path === '/api/lock/status') return r.fulfill({ json: { hasCode: locked, retryIn: 0 } });
+    if (path === '/api/backup') {
+      backups.push(body.reason || '');
+      if (backupFails) return r.fulfill({ status: 502, json: { error: 'Telegram не принял файл, попробуй позже' } });
+      return r.fulfill({ json: { ok: true, events: 0, at: Date.now() } });
+    }
     if (path === '/api/lock/verify') return r.fulfill({ json: { ok: false, reason: 'wrong', hasCode: true, retryIn: 0, error: 'Неверный код' } });
     return r.fulfill({ json: {} });
   });
@@ -82,7 +89,7 @@ async function openApp(b, scheme, { locked = false } = {}) {
   await p.goto(BASE);
   await p.waitForSelector('#view > *');
   await p.waitForTimeout(800);
-  return { ctx, p, errors };
+  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v) };
 }
 
 /** Перейти на раздел с чистого листа (открытые шторки закрываются). */
@@ -124,7 +131,7 @@ const browser = await chromium.launch();
 
 for (const scheme of ['light', 'dark']) {
   console.log(`\n▶ тема: ${scheme}`);
-  const { ctx, p, errors } = await openApp(browser, scheme);
+  const { ctx, p, errors, backups, failBackup } = await openApp(browser, scheme);
 
   console.log('Сегодня');
   await go(p, 'today');
@@ -170,6 +177,60 @@ for (const scheme of ['light', 'dark']) {
   await go(p, 'profile/prayer');
   ok((await p.locator('.adj .round-btn').count()) >= 10, 'время намаза: кнопки ± на месте');
   await shot(p, `prayer-${scheme}`);
+
+  console.log('Данные');
+  await go(p, 'profile/data');
+  const groups = await p.locator('#view .group-title').allInnerTexts();
+  ok(groups.join(' / ').toLowerCase() === 'резервная копия / опасная зона', `группы: ${groups.join(' / ')}`);
+  ok((await p.locator('#view [data-s=last-backup]').innerText()).startsWith('Бэкапов ещё не было'), '«Последний бэкап»: ещё не было');
+  ok((await p.locator('#view [data-set-bool="backup.weekly"]').isChecked()), 'еженедельный бэкап включён по умолчанию');
+  ok((await p.locator('#view .row.is-danger').count()) === 2, 'опасная зона: две красные строки');
+  ok((await overflowX(p)) <= 0, 'без горизонтальной прокрутки');
+  await shot(p, `data-${scheme}`);
+  // импорт: превью файла
+  await p.locator('#view [data-s=import]').setInputFiles({ name: 'b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(seed())) });
+  await p.waitForSelector('.import-preview');
+  ok((await p.locator('.import-preview .row').count()) === 6, 'превью импорта: 6 строк');
+  await p.waitForTimeout(500); // шторка доехала
+  await shot(p, `import-${scheme}`);
+  await p.click('.sheet [data-c=cancel]');
+  await p.waitForTimeout(400);
+  await p.locator('#view [data-s=import]').setInputFiles({ name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('{"foo":1}') });
+  await p.waitForTimeout(400);
+  ok((await text(p, '.sheet .confirm h3')) === 'Файл не подходит', 'чужой файл — ошибка');
+  await p.click('.sheet [data-c=ok]');
+  await p.waitForTimeout(400);
+  // сброс прогресса: кнопка активна только после слова
+  await p.click('#view [data-s=reset]');
+  await p.waitForSelector('.sheet [data-word]');
+  ok(await p.locator('.sheet [data-c=ok]').isDisabled(), 'сброс: кнопка неактивна без слова');
+  await p.fill('.sheet [data-word]', 'сбро');
+  ok(await p.locator('.sheet [data-c=ok]').isDisabled(), 'сброс: неполное слово не подходит');
+  await p.fill('.sheet [data-word]', 'сброс');
+  ok(await p.locator('.sheet [data-c=ok]').isEnabled(), 'сброс: после слова «СБРОС» — активна');
+  await p.waitForTimeout(300);
+  await shot(p, `reset-${scheme}`);
+  await p.click('.sheet [data-c=ok]');
+  await p.waitForTimeout(1200);
+  const after = await p.evaluate(() => JSON.parse(localStorage.getItem('myhabits:data:v1')));
+  ok(backups.includes('reset'), 'перед сбросом — бэкап с причиной «reset»');
+  ok(Object.keys(after.logs).length === 0 && after.habits.filter((h) => !h.deleted).length >= 2, 'сброс: история пуста, привычки на месте');
+  ok((await p.locator('#view [data-s=last-backup]').innerText()).startsWith('Последний бэкап:'), '«Последний бэкап» обновился');
+  await p.click('#view [data-s=wipe]');
+  await p.waitForSelector('.sheet [data-word]');
+  ok(await p.locator('.sheet [data-c=ok]').isDisabled(), 'удаление: кнопка неактивна без слова «УДАЛИТЬ»');
+  // бэкап не ушёл → шторка «Скачать экспорт и продолжить / Отмена»; отмена ничего не удаляет
+  failBackup(true);
+  await p.fill('.sheet [data-word]', 'УДАЛИТЬ');
+  await p.click('.sheet [data-c=ok]');
+  await p.waitForSelector('.sheet .confirm h3:text("Бэкап не отправлен")');
+  await p.waitForTimeout(400);
+  await shot(p, `backup-failed-${scheme}`);
+  await p.click('.sheet [data-c=cancel]');
+  await p.waitForTimeout(600);
+  const kept = await p.evaluate(() => JSON.parse(localStorage.getItem('myhabits:data:v1')));
+  ok(kept.habits.filter((h) => !h.deleted).length >= 2, 'бэкап не ушёл, «Отмена» — данные не удалены');
+  failBackup(false);
 
   console.log('Зикры');
   await go(p, 'today');
