@@ -1,5 +1,5 @@
 // Service worker: офлайн-кэш оболочки приложения.
-const VERSION = 'v32';
+const VERSION = 'v33';
 const CACHE = `my-habits-${VERSION}`;
 const ASSETS = [
   './',
@@ -26,6 +26,7 @@ const ASSETS = [
   './js/hijri.js',
   './js/dhikr.js',
   './js/backup.js',
+  './js/qibla.js',
   './data/dhikr.json',
   './icons/icon.svg',
   './icons/icon-192.png',

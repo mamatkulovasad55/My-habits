@@ -7,6 +7,7 @@ import {
 } from './store.js';
 import * as sync from './sync.js';
 import { importSummary, withBackup, lastBackupText, resetProgressNow } from './backup.js';
+import { qiblaBearing, distanceKm, declination, headingFromOrientation, delta, smoothHeading, isTilted, isNoisy, nearKaaba, norm360 } from './qibla.js';
 import { ACH_GROUPS, ACH_CATALOG, ACH_BADGES, badgeById, groupOf, computeAchievements, earnedFromData } from './achievements.js';
 import { protectedOn, isLocked, unlock, lockNow, noteLeave, noteReturn, checkRelock, onLockChange, bioInit, bio, bioLabel, bioEnabled, setBioEnabled, bioRequestAccess, bioAuthenticate, bioOpenSettings } from './lock.js';
 import { storage, storageGet, storageSet, storageRemove, storageFailed, onStorageStatus } from './storage.js';
@@ -19,7 +20,7 @@ import {
   habitHeatValue, overallHeatValue, hasStages, stageDone,
 } from './logic.js';
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
-import { PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel, tzMismatch, offsetLabel } from './prayer.js';
+import { sunAltAz, PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel, tzMismatch, offsetLabel } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
 import { forbiddenWindows } from './logic.js';
 import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS, DHIKR_PENDING_KEY } from './dhikr.js';
@@ -193,6 +194,7 @@ function viewToday() {
       </div>
       <div class="head-actions">
         ${!isToday ? `<button class="pill" data-action="go-today">Сегодня</button>` : ''}
+        <button class="icon-btn dhikr-btn" data-action="open-qibla" aria-label="Кибла">${icon.compass(20)}</button>
         <button class="icon-btn dhikr-btn" data-action="open-dhikr" aria-label="Зикр">${icon.beads(20)}</button>
         <button class="icon-btn" data-action="add-habit" aria-label="Новая привычка">${icon.plus(22)}</button>
       </div>
@@ -1791,6 +1793,7 @@ function viewProfile() {
 
     <div class="group-title">Намаз</div>
     <div class="card list-group">
+      ${navRow('qibla', { label: 'Кибла', value: `${Math.round(qiblaBearing(Number(st.prayer.lat), Number(st.prayer.lon)))}°`, glyph: 'compass', tint: 'var(--green)' })}
       ${navRow('prayer', { label: 'Время намаза', value: src.kind === 'formula' ? 'По формуле' : 'Сверено', glyph: 'dome', tint: 'var(--green)' })}
       ${navRow('juma', { label: 'Джума', value: st.juma.enabled ? 'Вкл' : 'Выкл', glyph: 'calendar', tint: 'var(--green)' })}
       ${navRow('qada', { label: 'Каза', value: d.total ? `Осталось ${d.total}` : 'Нет долгов', glyph: 'hourglass', tint: 'var(--orange)' })}
@@ -2344,6 +2347,7 @@ function applyAutoTz(settings) {
 }
 
 function openProfileSub(sub) {
+  if (sub === 'qibla') return openQibla();
   state.sub = PROFILE_SUBS[sub] ? sub : null;
   if (state.sub !== 'tz') tzQuery = '';
   history.replaceState(null, '', state.sub ? `#profile/${state.sub}` : '#profile');
@@ -3554,6 +3558,248 @@ function dhikrStatsSection() {
 }
 
 // ============================================================
+// Кибла: компас по датчику телефона, без датчика — азимут и солнце
+// ============================================================
+
+const QIBLA_ZONE = 3; // «Кибла ✓» в пределах ±3°
+let qiblaOpen = null; // открытая шторка (одна)
+
+function qiblaPlace() {
+  const p = getData().settings.prayer;
+  const lat = Number(p.lat);
+  const lon = Number(p.lon);
+  return { lat, lon, city: p.city || 'Мои координаты', bearing: qiblaBearing(lat, lon), km: distanceKm(lat, lon), dec: declination(lat, lon) };
+}
+
+const fmtKm = (km) => `${Math.round(km).toLocaleString('ru-RU')} км`;
+
+/** Циферблат: кольцо с делениями и сторонами света, Кааба на азимуте киблы; .qibla-rose вращается против курса. */
+function qiblaDial(bearing) {
+  const pt = (a, r) => [120 + r * Math.sin((a * Math.PI) / 180), 120 - r * Math.cos((a * Math.PI) / 180)].map((v) => v.toFixed(1));
+  let ticks = '';
+  for (let a = 0; a < 360; a += 10) {
+    const [x1, y1] = pt(a, a % 30 ? 94 : 88);
+    const [x2, y2] = pt(a, 100);
+    ticks += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="${a % 90 ? '' : 'is-main'}"/>`;
+  }
+  const sides = [['С', 0], ['В', 90], ['Ю', 180], ['З', 270]].map(([t, a]) => {
+    const [x, y] = pt(a, 74);
+    return `<text x="${x}" y="${y}" class="${a ? '' : 'is-north'}" transform="rotate(${a} ${x} ${y})">${t}</text>`;
+  }).join('');
+  const [kx, ky] = pt(bearing, 84); // Кааба внутри кольца — не под указателем
+  const [sx, sy] = pt(bearing, 50); // пунктир от края центральной надписи
+  const [lx, ly] = pt(bearing, 72);
+  return `<svg class="qibla-dial" viewBox="0 0 240 240" aria-hidden="true">
+      <g class="qibla-rose">
+        <circle cx="120" cy="120" r="100" class="qibla-ring"/>
+        <g class="qibla-ticks">${ticks}</g>
+        <g class="qibla-sides" font-size="15">${sides}</g>
+        <line x1="${sx}" y1="${sy}" x2="${lx}" y2="${ly}" class="qibla-ray"/>
+        <g transform="translate(${kx} ${ky}) rotate(${bearing.toFixed(1)})"><rect x="-10" y="-10" width="20" height="20" rx="3" class="qibla-kaaba"/><rect x="-10" y="-5" width="20" height="3.5" class="qibla-kaaba-band"/></g>
+      </g>
+      <path d="M120 2 l9 15 h-18z" class="qibla-pointer"/>
+    </svg>`;
+}
+
+/** Подсказка о повороте; null — пока нет курса. */
+function qiblaHint(st) {
+  if (st.heading == null) return 'Ищу север…';
+  if (st.tilt) return 'Положи телефон горизонтально';
+  if (st.calib) return 'Откалибруй компас: покрути телефон восьмёркой';
+  const d = delta(st.heading, st.place.bearing);
+  if (Math.abs(d) <= QIBLA_ZONE) return 'Кибла ✓';
+  return d > 0 ? `Повернись правее на ${Math.round(d)}°` : `Левее на ${Math.round(-d)}°`;
+}
+
+function qiblaHTML(st) {
+  const pl = st.place;
+  const deg = `${Math.round(pl.bearing)}°`;
+  const foot = `
+      <div class="card list-group qibla-place">
+        <div class="row static"><span class="row-main"><span>Для: ${esc(pl.city)} · <button class="link-btn" data-q="city">изменить</button></span></span><button class="pill" data-q="locate">📍 Где я</button></div>
+      </div>
+      <p class="hint qibla-note">Магниты, металл и чехлы искажают компас. В мечети ориентируйся на михраб.</p>`;
+  const iosNorth = tg.platform() === 'ios' && st.source === 'telegram' ? `
+      <div class="card list-group"><label class="row static switch-row"><span class="row-main"><span>У Telegram есть доступ к геопозиции</span><span class="muted">Настройки iPhone → Telegram → Геопозиция. От этого зависит поправка ${Math.abs(pl.dec).toFixed(1).replace('.', ',')}° на магнитный север</span></span><input type="checkbox" class="switch" data-q="truenorth" ${getData().settings.qibla?.iosTrueNorth !== false ? 'checked' : ''}></label></div>` : '';
+  let body;
+  if (st.mode === 'near') {
+    body = `<div class="qibla-static"><div class="qibla-big">Ты рядом с Каабой</div><p class="qibla-sub">Ориентируйся на саму Каабу и имама.</p></div>`;
+  } else if (st.mode === 'compass') {
+    body = `<div class="qibla-wrap ${st.inZone ? 'is-qibla' : ''}">${qiblaDial(pl.bearing)}
+        <div class="qibla-center"><b class="qibla-num">${deg} · ${fmtKm(pl.km)}</b><span class="qibla-hint" aria-live="polite">${esc(qiblaHint(st))}</span></div>
+      </div>${iosNorth}`;
+  } else if (st.mode === 'starting') {
+    body = `<div class="qibla-wrap is-waiting">${qiblaDial(pl.bearing)}<div class="qibla-center"><b class="qibla-num">${deg} · ${fmtKm(pl.km)}</b><span class="qibla-hint">Включаю компас…</span></div></div>`;
+  } else {
+    const sun = sunAltAz(new Date(), pl.lat, pl.lon);
+    const sd = delta(sun.az, pl.bearing);
+    const sunLine = sun.alt > 0
+      ? `Сейчас солнце на азимуте ${Math.round(sun.az)}°. Кибла — на ${Math.abs(Math.round(sd))}° ${sd >= 0 ? 'правее' : 'левее'} солнца.`
+      : `Открой компас телефона и повернись на ${deg}.`;
+    const ask = st.mode === 'permission'
+      ? `<button class="btn btn-primary btn-block" data-q="allow">${icon.compass(18)} Включить компас</button>`
+      : st.mode === 'denied'
+        ? `<p class="hint">Доступ к компасу не дан. Если запрос не появляется — разреши доступ к движению в настройках iPhone и перезапусти трекер.</p><button class="btn btn-secondary btn-block" data-q="allow">Разрешить снова</button>`
+        : '';
+    body = `<div class="qibla-static">
+        <div class="qibla-wrap is-static">${qiblaDial(pl.bearing)}</div>
+        <div class="qibla-big">Кибла: ${deg} от севера</div>
+        <p class="qibla-sub">${fmtKm(pl.km)} до Каабы · ${esc(pl.city)}</p>
+        <p class="qibla-sun">${esc(sunLine)}</p>
+        ${ask}
+      </div>`;
+  }
+  return `<header class="sheet-header"><span></span><strong>Кибла</strong><button class="link-btn strong" data-q="close">Готово</button></header>
+    <div class="sheet-body qibla-body">${body}${foot}</div>`;
+}
+
+/** Покадровое обновление циферблата и подсказки без перерисовки шторки. */
+function qiblaPaint(el, st) {
+  st.frame = 0;
+  if (st.mode !== 'compass' || st.heading == null) return;
+  const rose = el.querySelector('.qibla-rose');
+  if (rose) rose.style.transform = `rotate(${(-st.heading).toFixed(1)}deg)`;
+  const d = Math.abs(delta(st.heading, st.place.bearing));
+  // вибрация один раз при входе в зону; выход — с запасом 1°, чтобы не дребезжало на границе
+  const inZone = !st.tilt && (st.inZone ? d <= QIBLA_ZONE + 1 : d <= QIBLA_ZONE);
+  if (inZone && !st.inZone) tg.haptic('success');
+  st.inZone = inZone;
+  el.querySelector('.qibla-wrap')?.classList.toggle('is-qibla', inZone);
+  const hint = el.querySelector('.qibla-hint');
+  const text = qiblaHint(st);
+  if (hint && hint.textContent !== text) hint.textContent = text;
+}
+
+function openQibla() {
+  if (qiblaOpen) return;
+  const st = { mode: 'starting', source: '', heading: null, samples: [], tilt: false, calib: false, inZone: false, stop: null, timer: 0, frame: 0, triedBrowser: false, place: qiblaPlace() };
+  const listeners = [];
+  const listen = (target, ev, fn) => {
+    target.addEventListener(ev, fn);
+    listeners.push(() => target.removeEventListener(ev, fn));
+  };
+  const stopSensor = () => {
+    clearTimeout(st.timer);
+    st.stop?.();
+    st.stop = null;
+    listeners.splice(0).forEach((off) => off());
+  };
+  const setMode = (mode) => {
+    if (st.mode === mode) return;
+    st.mode = mode;
+    api.refresh();
+  };
+  const noCompass = () => {
+    stopSensor();
+    setMode('nocompass');
+  };
+  const feed = ({ source, alpha, compassHeading, beta, gamma, accuracy }) => {
+    if (!qiblaOpen) return;
+    const raw = headingFromOrientation({ source, alpha, compassHeading, platform: tg.platform(), trueNorth: getData().settings.qibla?.iosTrueNorth !== false, declination: st.place.dec });
+    const now = Date.now();
+    st.heading = smoothHeading(st.heading, raw);
+    st.samples.push({ t: now, h: raw });
+    while (st.samples.length && now - st.samples[0].t > 1500) st.samples.shift();
+    st.tilt = isTilted(beta, gamma);
+    st.calib = isNoisy(st.samples, now) || (accuracy != null && (accuracy < 0 || accuracy > 15));
+    if (st.mode !== 'compass') {
+      clearTimeout(st.timer);
+      st.source = source === 'telegram' ? 'telegram' : 'browser';
+      st.mode = 'compass';
+      api.refresh();
+    }
+    if (!st.frame) st.frame = requestAnimationFrame(() => qiblaPaint(api.el, st));
+  };
+  // браузерный датчик: Android — deviceorientationabsolute, iOS — webkitCompassHeading (после разрешения по нажатию)
+  const browserListen = () => {
+    if ('ondeviceorientationabsolute' in window) {
+      listen(window, 'deviceorientationabsolute', (e) => e.alpha != null && feed({ source: 'absolute', alpha: e.alpha, beta: e.beta, gamma: e.gamma }));
+    } else {
+      listen(window, 'deviceorientation', (e) => {
+        if (e.webkitCompassHeading != null) feed({ source: 'webkit', compassHeading: e.webkitCompassHeading, beta: e.beta, gamma: e.gamma, accuracy: e.webkitCompassAccuracy });
+        else if (e.absolute && e.alpha != null) feed({ source: 'absolute', alpha: e.alpha, beta: e.beta, gamma: e.gamma });
+      });
+    }
+    st.timer = setTimeout(() => st.heading == null && noCompass(), 1500); // датчика нет (Desktop) — без компаса
+  };
+  const browserStart = () => {
+    stopSensor();
+    if (st.triedBrowser) return noCompass();
+    st.triedBrowser = true;
+    const DOE = window.DeviceOrientationEvent;
+    if (!DOE) return noCompass();
+    // iOS: абсолютного события нет, а компас доступен только после разрешения по нажатию
+    if (!('ondeviceorientationabsolute' in window) && typeof DOE.requestPermission === 'function') return setMode('permission');
+    browserListen();
+  };
+  const askPermission = () => {
+    window.DeviceOrientationEvent.requestPermission().then(
+      (r) => {
+        if (r !== 'granted') return setMode('denied');
+        setMode('starting');
+        browserListen();
+      },
+      () => setMode('denied'),
+    );
+  };
+  const start = () => {
+    stopSensor();
+    st.place = qiblaPlace();
+    st.heading = null;
+    st.samples = [];
+    st.triedBrowser = false;
+    if (nearKaaba(st.place.lat, st.place.lon)) return setMode('near');
+    st.mode = 'starting';
+    const stopTg = tg.startOrientation({
+      onData: (d) => (d.absolute ? feed({ source: 'telegram', alpha: d.alpha, beta: (d.beta * 180) / Math.PI, gamma: (d.gamma * 180) / Math.PI }) : browserStart()),
+      onFail: () => browserStart(),
+    });
+    if (!stopTg) return browserStart();
+    st.stop = stopTg;
+    st.timer = setTimeout(() => st.heading == null && browserStart(), 1500);
+  };
+  // свернули мини-апп — датчик стоп; вернулись — снова
+  const onVisibility = () => (document.visibilityState === 'hidden' ? stopSensor() : qiblaOpen && start());
+  document.addEventListener('visibilitychange', onVisibility);
+  let placeKey = '';
+  const api = openSheet({
+    className: 'sheet-full qibla-sheet',
+    live: true,
+    render: () => {
+      const pl = qiblaPlace();
+      const key = `${pl.lat},${pl.lon}`;
+      if (placeKey && key !== placeKey) setTimeout(start, 0); // сменили город — пересчёт
+      placeKey = key;
+      st.place = { ...pl };
+      return qiblaHTML(st);
+    },
+    mount: (a) => {
+      const q = (k) => a.el.querySelector(`[data-q=${k}]`);
+      q('close').onclick = () => a.close();
+      q('city').onclick = () => {
+        a.close();
+        location.hash = '#profile/city';
+      };
+      q('locate').onclick = () => locateCity();
+      if (q('allow')) q('allow').onclick = askPermission;
+      if (q('truenorth')) q('truenorth').onchange = (e) => setSetting('qibla.iosTrueNorth', e.target.checked);
+      qiblaPaint(a.el, st);
+    },
+    onClose: () => {
+      qiblaOpen = null;
+      stopSensor();
+      cancelAnimationFrame(st.frame);
+      document.removeEventListener('visibilitychange', onVisibility);
+      tg.lockOrientation(false);
+    },
+  });
+  qiblaOpen = api;
+  tg.lockOrientation(true);
+  start();
+  api.refresh();
+}
+
+// ============================================================
 // События
 // ============================================================
 
@@ -3564,6 +3810,7 @@ document.addEventListener('click', (e) => {
   switch (t.dataset.action) {
     case 'add-habit': return openHabitEditor();
     case 'open-dhikr': return openDhikr();
+    case 'open-qibla': return openQibla();
     case 'home-add': return addHomeIcon();
     case 'home-hint-close': return setSetting('homeScreen.hintDone', true);
     case 'open-habit': return openHabitDetail(id);

@@ -125,3 +125,52 @@ export function addToHomeScreen({ onAdded, onFailed } = {}) {
     return false;
   }
 }
+
+// ---------- Датчик ориентации (Bot API 8.0) и блокировка поворота экрана ----------
+
+/** Платформа клиента Telegram: 'ios', 'android', 'tdesktop', 'web'… */
+export const platform = () => W()?.platform || '';
+
+/**
+ * Запустить WebApp.DeviceOrientation (абсолютный режим). onData({ absolute, alpha, beta, gamma }) — радианы.
+ * onFail() — датчика нет или Telegram его не запустил. → функция остановки (или null, если API нет).
+ */
+export function startOrientation({ onData, onFail, refreshRate = 50 } = {}) {
+  const w = W();
+  const o = w?.DeviceOrientation;
+  if (!w?.initData || !o?.start || !w.isVersionAtLeast?.('8.0')) return null;
+  const changed = () => onData?.({ absolute: Boolean(o.absolute), alpha: o.alpha, beta: o.beta, gamma: o.gamma });
+  const failed = () => onFail?.();
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    try {
+      w.offEvent?.('deviceOrientationChanged', changed);
+      w.offEvent?.('deviceOrientationFailed', failed);
+      o.stop?.();
+    } catch {
+      /* ignore */
+    }
+  };
+  try {
+    w.onEvent?.('deviceOrientationChanged', changed);
+    w.onEvent?.('deviceOrientationFailed', failed);
+    o.start({ refresh_rate: refreshRate, need_absolute: true }, (ok) => ok === false && failed());
+    return stop;
+  } catch {
+    stop();
+    return null;
+  }
+}
+
+/** Зафиксировать поворот экрана (true) или вернуть свободный поворот (false). */
+export function lockOrientation(lock) {
+  const w = W();
+  if (!w?.initData || !w.isVersionAtLeast?.('8.0')) return;
+  try {
+    lock ? w.lockOrientation?.() : w.unlockOrientation?.();
+  } catch {
+    /* ignore */
+  }
+}

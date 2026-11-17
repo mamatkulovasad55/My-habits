@@ -93,6 +93,20 @@ function sunPosition(jd) {
 }
 
 /**
+ * Положение солнца в момент date (UTC) для точки lat, lon: высота над горизонтом и азимут от истинного севера, градусы.
+ * Та же астрономия, что у времени намаза (sunPosition), — для киблы без компаса.
+ */
+export function sunAltAz(date, lat, lon) {
+  const h = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+  const jd = julian(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()) + h / 24;
+  const { decl, eqt } = sunPosition(jd);
+  const H = 15 * (h - (12 - eqt - lon / 15)); // часовой угол: 0 — полдень
+  const alt = arcsin(sin(lat) * sin(decl) + cos(lat) * cos(decl) * cos(H));
+  const az = fix(arctan2(sin(H), cos(H) * sin(lat) - tan(decl) * cos(lat)) + 180, 360);
+  return { alt, az };
+}
+
+/**
  * Время намазов на дату (y, m 1..12, d) в минутах от местной полуночи.
  * tzOffsetHours — смещение часового пояса от UTC (например 5 для Ташкента).
  */
