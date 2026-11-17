@@ -55,7 +55,8 @@ function seed() {
   return d;
 }
 
-async function openApp(b, scheme, { locked = false } = {}) {
+/** home — ответ checkHomeScreenStatus ('missed' | 'unknown' | 'added' | 'unsupported'), days — сколько разных дней открывали приложение. */
+async function openApp(b, scheme, { locked = false, home = 'unsupported', days = 1 } = {}) {
   const ctx = await b.newContext({ ...devices['iPhone 13'], viewport: { width: 390, height: 740 }, colorScheme: scheme, locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   let remote = seed();
   if (locked) remote.settings.privacy = { ...remote.settings.privacy, enabled: true };
@@ -81,8 +82,13 @@ async function openApp(b, scheme, { locked = false } = {}) {
     if (path === '/api/lock/verify') return r.fulfill({ json: { ok: false, reason: 'wrong', hasCode: true, retryIn: 0, error: 'Неверный код' } });
     return r.fulfill({ json: {} });
   });
-  await ctx.addInitScript(`window.Telegram = { WebApp: { initData: 'x=1&hash=a', initDataUnsafe: { user: { first_name: 'Тест' } }, platform: 'ios', colorScheme: '${scheme}',
-    isVersionAtLeast: () => true, ready(){}, expand(){}, disableVerticalSwipes(){}, setHeaderColor(){}, setBackgroundColor(){}, setBottomBarColor(){}, onEvent(){},
+  const openDays = Array.from({ length: days }, (_, i) => `2026-11-${String(16 - i).padStart(2, '0')}`).reverse();
+  await ctx.addInitScript(`try { const k = 'myhabits:local:v1'; const l = JSON.parse(localStorage.getItem(k) || '{}'); if (!l.seeded) localStorage.setItem(k, JSON.stringify({ ...l, timers: l.timers || {}, openDays: ${JSON.stringify(openDays)}, seeded: true })); } catch {}`);
+  await ctx.addInitScript(`window.__home = { status: '${home}', calls: 0, h: {} }; window.Telegram = { WebApp: { initData: 'x=1&hash=a', initDataUnsafe: { user: { first_name: 'Тест' } }, platform: 'ios', colorScheme: '${scheme}',
+    isVersionAtLeast: () => true, ready(){}, expand(){}, disableVerticalSwipes(){}, setHeaderColor(){}, setBackgroundColor(){}, setBottomBarColor(){},
+    onEvent(e, fn){ (window.__home.h[e] = window.__home.h[e] || []).push(fn); }, offEvent(e, fn){ window.__home.h[e] = (window.__home.h[e] || []).filter((x) => x !== fn); },
+    checkHomeScreenStatus(cb){ setTimeout(() => cb(window.__home.status), 10); },
+    addToHomeScreen(){ window.__home.calls++; },
     BackButton: { show(){}, hide(){}, onClick(){} }, HapticFeedback: { impactOccurred(){}, notificationOccurred(){}, selectionChanged(){} } } };`);
   const p = await ctx.newPage();
   await p.clock.install({ time: NOW });
@@ -91,7 +97,7 @@ async function openApp(b, scheme, { locked = false } = {}) {
   await p.goto(BASE);
   await p.waitForSelector('#view > *');
   await p.waitForTimeout(800);
-  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v), slowBackup: (ms) => (backupDelay = ms) };
+  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v), slowBackup: (ms) => (backupDelay = ms), remoteSettings: () => remote.settings };
 }
 
 /** Перейти на раздел с чистого листа (открытые шторки закрываются). */
@@ -267,6 +273,61 @@ for (const scheme of ['light', 'dark']) {
 
   ok(!errors.length, `без ошибок JS${errors.length ? `:\n      ${errors.join('\n      ')}` : ''}`);
   await ctx.close();
+
+  console.log('Иконка на экране «Домой»');
+  {
+    // статус missed, 3-й день: строка с «Добавить» и подсказка на «Сегодня»
+    const m = await openApp(browser, scheme, { home: 'missed', days: 3 });
+    await go(m.p, 'today');
+    ok((await m.p.locator('.home-hint').count()) === 1, '3-й день, иконки нет — подсказка на «Сегодня»');
+    const smallHint = await smallTargets(m.p, '.home-hint .pill, .home-hint-close');
+    ok(!smallHint.length, `подсказка: кнопки 44×44${smallHint.length ? `: ${smallHint.join(', ')}` : ''}`);
+    await m.p.evaluate(() => scrollTo(0, 9999));
+    await m.p.locator('.home-hint').screenshot({ path: join(OUT, `home-hint-${scheme}.png`) });
+    await m.p.click('.home-hint-close');
+    await m.p.waitForTimeout(300);
+    ok((await m.p.locator('.home-hint').count()) === 0, '✕ — подсказка скрыта');
+    await go(m.p, 'today');
+    ok((await m.p.locator('.home-hint').count()) === 0, 'после перезапуска подсказка не возвращается');
+    ok(m.remoteSettings().homeScreen?.hintDone === true, 'флаг «не показывать» ушёл на сервер (синхронизируется)');
+    await go(m.p, 'profile');
+    const row = m.p.locator('#view .home-row');
+    ok((await row.count()) === 1 && (await row.locator('.pill').innerText()) === 'Добавить', 'Профиль: строка «Иконка на экране «Домой»» с «Добавить»');
+    ok((await m.p.locator('#view .list-group').last().locator('.row').first().getAttribute('class')).includes('home-row'), 'строка — первая в группе «Приложение»');
+    await m.p.evaluate(() => document.querySelector('#view .home-row').scrollIntoView({ block: 'center' }));
+    await row.screenshot({ path: join(OUT, `home-row-missed-${scheme}.png`) });
+    // «Добавить» → метод вызван; событие homeScreenAdded → тост и «Добавлено»
+    await row.locator('.pill').click();
+    ok((await m.p.evaluate(() => window.__home.calls)) === 1, '«Добавить» вызывает addToHomeScreen');
+    await m.p.evaluate(() => { window.__home.status = 'added'; (window.__home.h.homeScreenAdded || []).forEach((fn) => fn()); });
+    await m.p.waitForTimeout(300);
+    ok((await text(m.p, '.toast')) === 'Иконка добавлена', 'тост «Иконка добавлена»');
+    ok((await text(m.p, '#view .home-row .home-done')).includes('Добавлено') && (await m.p.locator('#view .home-row .pill').count()) === 0, 'строка → «Добавлено», без кнопки');
+    await m.p.evaluate(() => document.querySelectorAll('.toast').forEach((t) => t.remove()));
+    await m.p.evaluate(() => document.querySelector('#view .home-row').scrollIntoView({ block: 'center' }));
+    await m.p.locator('#view .home-row').screenshot({ path: join(OUT, `home-row-added-${scheme}.png`) });
+    ok(!m.errors.length, `без ошибок JS${m.errors.length ? `:\n      ${m.errors.join('\n      ')}` : ''}`);
+    await m.ctx.close();
+  }
+  {
+    // 2-й день — подсказки ещё нет; unknown (iOS) — подпись в строке
+    const u = await openApp(browser, scheme, { home: 'unknown', days: 2 });
+    await go(u.p, 'today');
+    ok((await u.p.locator('.home-hint').count()) === 0, '2-й день — подсказки нет');
+    await go(u.p, 'profile');
+    ok((await text(u.p, '#view .home-row .nav-sub')) === 'Telegram не сообщает, добавлена ли иконка', 'unknown: «Добавить» и подпись');
+    await u.p.evaluate(() => document.querySelector('#view .home-row').scrollIntoView({ block: 'center' }));
+    await u.p.locator('#view .home-row').screenshot({ path: join(OUT, `home-row-unknown-${scheme}.png`) });
+    await u.ctx.close();
+    // unsupported (Desktop, Web) — ни строки, ни подсказки
+    const d = await openApp(browser, scheme, { home: 'unsupported', days: 3 });
+    await go(d.p, 'today');
+    const hintNone = (await d.p.locator('.home-hint').count()) === 0;
+    await go(d.p, 'profile');
+    ok(hintNone && (await d.p.locator('#view .home-row').count()) === 0, 'unsupported: ни строки, ни подсказки');
+    ok(!d.errors.length, 'unsupported: без ошибок JS');
+    await d.ctx.close();
+  }
 
   console.log('Экран блокировки');
   const lock = await openApp(browser, scheme, { locked: true });

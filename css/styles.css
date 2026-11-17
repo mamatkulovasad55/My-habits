@@ -1463,3 +1463,14 @@ body:has(.storage-warn) .view { padding-bottom: calc(var(--tabbar-h) + var(--saf
 .confirm .danger-word input.field { text-align: center; text-transform: uppercase; letter-spacing: 0.08em; }
 .import-preview { margin: 0 0 var(--ios-space-m); text-align: left; }
 .import-preview .row .muted { text-align: right; font-size: var(--ios-subheadline); }
+
+/* ---------- Иконка на экране «Домой» ---------- */
+.home-row .pill { flex: none; }
+.home-done { flex: none; white-space: nowrap; max-width: none; display: inline-flex; align-items: center; gap: var(--ios-space-xs); color: var(--ios-label-secondary); }
+.home-done svg { color: var(--ios-green); }
+.home-hint { display: flex; align-items: center; gap: var(--ios-space-m); margin-top: var(--ios-space-l); padding: var(--ios-space-m) var(--ios-space-s) var(--ios-space-m) var(--ios-space-l); }
+.home-hint-text { flex: 1; min-width: 0; font-size: var(--ios-subheadline); line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
+.home-hint .pill { flex: none; }
+.home-hint-close { flex: none; color: var(--ios-label-secondary); }
+.home-hint .pill, .home-row .pill { position: relative; }
+.home-hint .pill::after, .home-row .pill::after { content: ''; position: absolute; inset: calc(-1 * var(--ios-space-s)) 0; }

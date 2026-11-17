@@ -114,6 +114,7 @@ function route() {
     noteReturn();
   }
   state.sub = state.route === 'profile' && PROFILE_SUBS[sub] ? sub : null;
+  if (state.route === 'profile' && !state.sub) refreshHomeStatus(); // при каждом открытии Профиля (иконку могли удалить)
   if (state.sub !== 'tz') tzQuery = '';
   state.reorder = false;
   render();
@@ -209,8 +210,61 @@ function viewToday() {
     ${habits.length || abst.length ? `
       <div class="group-title">Заметка дня</div>
       <div class="card pad note-card"><textarea class="note-input" id="day-note" rows="2" placeholder="Как прошёл день? Что помогло, что мешало…">${esc(getData().notes[key]?.text || '')}</textarea></div>` : ''}`}
+    ${isToday && !state.reorder ? homeHint() : ''}
     ${empty}
   `;
+}
+
+// ---------- Иконка на экране «Домой» ----------
+
+let homeStatus = 'unsupported'; // статус из Telegram; до ответа строки и подсказки нет
+
+/** Перепроверить статус (могли удалить иконку вручную) и перерисовать, если он изменился. */
+function refreshHomeStatus() {
+  tg.homeScreenStatus().then((s) => {
+    if (s === homeStatus) return;
+    homeStatus = s;
+    if (state.route === 'profile' && !state.sub) render();
+    if (state.route === 'today') render();
+  });
+}
+
+const homeCanAdd = () => homeStatus === 'missed' || homeStatus === 'unknown';
+
+/** Подсказка на «Сегодня»: не раньше 3-го дня использования, пока не закрыта и иконки нет. */
+function homeHint() {
+  if (!homeCanAdd() || getData().settings.homeScreen?.hintDone || (getLocal().openDays || []).length < 3 || topSheet()) return '';
+  return `<section class="card home-hint">
+      <span class="nav-ic" style="--c:var(--green)">${icon.home(18)}</span>
+      <span class="home-hint-text">Открывай трекер с экрана телефона</span>
+      <button class="pill" data-action="home-add">Добавить</button>
+      <button class="icon-btn sm home-hint-close" data-action="home-hint-close" aria-label="Больше не показывать">${icon.close(16)}</button>
+    </section>`;
+}
+
+/** Строка «Иконка на экране «Домой»» в Профиле (нет поддержки — строки нет). */
+function homeRow() {
+  if (homeStatus === 'unsupported') return '';
+  return `<div class="row static nav-row home-row">
+      <span class="nav-ic" style="--c:var(--green)">${icon.home(18)}</span>
+      <span class="nav-label nav-stack"><span>Иконка на экране «Домой»</span>${homeStatus === 'unknown' ? '<span class="nav-sub">Telegram не сообщает, добавлена ли иконка</span>' : ''}</span>
+      ${homeStatus === 'added' ? `<span class="nav-val home-done">${icon.check(14)} Добавлено</span>` : '<button class="pill" data-action="home-add">Добавить</button>'}
+    </div>`;
+}
+
+/** «Добавить»: вызывается прямо из нажатия (Android принимает запрос только сразу после касания). */
+function addHomeIcon() {
+  const ok = tg.addToHomeScreen({
+    onAdded: () => {
+      homeStatus = 'added';
+      if (!getData().settings.homeScreen?.hintDone) setSetting('homeScreen.hintDone', true);
+      else render();
+      toast('Иконка добавлена');
+    },
+  });
+  if (!ok) return toast('Telegram не умеет добавлять иконку на этом устройстве');
+  // iOS (unknown): Telegram не сообщит об успехе — подсказка больше не нужна после первого «Добавить»
+  if (homeStatus === 'unknown' && !getData().settings.homeScreen?.hintDone) setSetting('homeScreen.hintDone', true);
 }
 
 // ---------- Объединение отдельных намазов ----------
@@ -1751,6 +1805,7 @@ function viewProfile() {
 
     <div class="group-title">Приложение</div>
     <div class="card list-group">
+      ${homeRow()}
       ${navRow('theme', { label: 'Оформление', value: THEME_LABEL[st.theme] || THEME_LABEL.system, glyph: 'contrast', tint: 'var(--gray)' })}
       ${navRow('privacy', { label: 'Конфиденциальность', value: protectedOn() ? 'Вкл' : 'Выкл', glyph: 'lock', tint: 'var(--blue)' })}
       ${navRow('archive', { label: 'Архив привычек', value: archived ? String(archived) : 'Пусто', glyph: 'archive', tint: 'var(--gray)' })}
@@ -3509,6 +3564,8 @@ document.addEventListener('click', (e) => {
   switch (t.dataset.action) {
     case 'add-habit': return openHabitEditor();
     case 'open-dhikr': return openDhikr();
+    case 'home-add': return addHomeIcon();
+    case 'home-hint-close': return setSetting('homeScreen.hintDone', true);
     case 'open-habit': return openHabitDetail(id);
     case 'habit-tap': e.stopPropagation(); return habitTap(id);
     case 'select-day': state.day = parseKey(t.dataset.day); return render();
@@ -3640,7 +3697,11 @@ if (!tg.inTelegram()) {
   tg.init({ onBack: () => (topSheet() ? topSheet().close() : state.route === 'profile' && state.sub && profileBack()), onTheme: applyTheme });
   setBaseBack(() => !topSheet() && state.route === 'profile' && Boolean(state.sub));
   enableEdgeSwipeBack();
+  // дни использования (для подсказки про иконку): хватает трёх разных дат
+  const day = todayKey();
+  if (!(getLocal().openDays || []).includes(day)) updateLocal((l) => (l.openDays = [...(l.openDays || []), day].slice(-3)));
   route();
+  refreshHomeStatus();
   recoverDhikr();
   window.Telegram?.WebApp?.onEvent?.('deactivated', commitDhikr);
   // защита «Детокса»: свернули — блокировка (сразу или по таймеру); вернулись — проверка таймера
@@ -3648,6 +3709,7 @@ if (!tg.inTelegram()) {
   // вернулись в приложение (например, из чата с ботом после «Сбросить код») — сразу перепроверить статус кода
   const onBack = () => {
     checkRelock();
+    refreshHomeStatus(); // вернулись из системного диалога или Safari
     if (firstSyncDone) runAchievements();
     if (state.route === 'abstain' && isLocked()) lockStatus();
   };

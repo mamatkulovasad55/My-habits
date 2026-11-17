@@ -41,6 +41,7 @@ export function defaultSettings() {
     tartib: { enabled: false, limit: 6, countOld: false, countVitr: true, asked: false },
     dhikr: { target: 33, haptics: true, last: 'subhanallah', favorites: [] }, // счётчик зикров: цель (0 — без цели), вибрация, последний зикр
     backup: { weekly: true }, // еженедельный бэкап в бота (воскресенье 21:00)
+    homeScreen: { hintDone: false }, // подсказка «иконка на экране «Домой»» больше не показывается
   };
 }
 
@@ -79,6 +80,7 @@ function normalizeSettings(raw) {
     profile: { ...d.profile, ...(s.profile || {}) },
     privacy: { ...d.privacy, ...(s.privacy || {}) },
     backup: { ...d.backup, ...(s.backup || {}) },
+    homeScreen: { ...d.homeScreen, ...(s.homeScreen || {}) },
   }, d);
 }
 
