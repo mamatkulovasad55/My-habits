@@ -56,7 +56,8 @@ function seed() {
 }
 
 /** home — ответ checkHomeScreenStatus ('missed' | 'unknown' | 'added' | 'unsupported'), days — сколько разных дней открывали приложение. */
-async function openApp(b, scheme, { locked = false, home = 'unsupported', days = 1 } = {}) {
+/** compass — курс телефона в градусах для замоканного WebApp.DeviceOrientation (absolute); null — датчика нет. */
+async function openApp(b, scheme, { locked = false, home = 'unsupported', days = 1, compass = null } = {}) {
   const ctx = await b.newContext({ ...devices['iPhone 13'], viewport: { width: 390, height: 740 }, colorScheme: scheme, locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   let remote = seed();
   if (locked) remote.settings.privacy = { ...remote.settings.privacy, enabled: true };
@@ -89,6 +90,11 @@ async function openApp(b, scheme, { locked = false, home = 'unsupported', days =
     onEvent(e, fn){ (window.__home.h[e] = window.__home.h[e] || []).push(fn); }, offEvent(e, fn){ window.__home.h[e] = (window.__home.h[e] || []).filter((x) => x !== fn); },
     checkHomeScreenStatus(cb){ setTimeout(() => cb(window.__home.status), 10); },
     addToHomeScreen(){ window.__home.calls++; },
+    lockOrientation(){ window.__home.lock = (window.__home.lock || 0) + 1; }, unlockOrientation(){ window.__home.unlock = (window.__home.unlock || 0) + 1; },
+    ${compass == null ? '' : `DeviceOrientation: { isStarted: false, absolute: true, alpha: 0, beta: 0, gamma: 0,
+      start(p, cb){ this.isStarted = true; this.alpha = ${compass} * Math.PI / 180; window.__home.orient = p; cb && cb(true);
+        window.__home.timer = setInterval(() => (window.__home.h.deviceOrientationChanged || []).forEach((fn) => fn()), 50); return this; },
+      stop(cb){ this.isStarted = false; clearInterval(window.__home.timer); window.__home.stopped = (window.__home.stopped || 0) + 1; cb && cb(true); return this; } },`}
     BackButton: { show(){}, hide(){}, onClick(){} }, HapticFeedback: { impactOccurred(){}, notificationOccurred(){}, selectionChanged(){} } } };`);
   const p = await ctx.newPage();
   await p.clock.install({ time: NOW });
@@ -262,7 +268,7 @@ for (const scheme of ['light', 'dark']) {
 
   console.log('Зикры');
   await go(p, 'today');
-  await p.click('.dhikr-btn');
+  await p.click('[data-action=open-dhikr]');
   await p.waitForSelector('.dhikr-col');
   ok((await p.locator('.dhikr-col').count()) === 4, 'четыре раздела зикров');
   await shot(p, `dhikr-${scheme}`);
@@ -327,6 +333,44 @@ for (const scheme of ['light', 'dark']) {
     ok(hintNone && (await d.p.locator('#view .home-row').count()) === 0, 'unsupported: ни строки, ни подсказки');
     ok(!d.errors.length, 'unsupported: без ошибок JS');
     await d.ctx.close();
+  }
+
+  console.log('Кибла');
+  {
+    // без датчика (как Telegram Desktop): азимут, расстояние, город, подсказка по солнцу или компасу телефона
+    const n = await openApp(browser, scheme);
+    await go(n.p, 'today');
+    await n.p.click('[data-action=open-qibla]');
+    await n.p.waitForSelector('.qibla-big', { timeout: 5000 });
+    ok((await text(n.p, '.qibla-big')) === 'Кибла: 240° от севера', 'без компаса: «Кибла: 240° от севера»');
+    ok((await text(n.p, '.qibla-sub')).replace(/\s/g, ' ').startsWith('3 531 км до Каабы · Ташкент'), 'расстояние и город');
+    ok(/солнце на азимуте \d+°\. Кибла — на \d+° (правее|левее) солнца|Открой компас телефона/.test(await text(n.p, '.qibla-sun')), 'подсказка по солнцу или компасу телефона');
+    await n.p.waitForTimeout(300);
+    await n.p.screenshot({ path: join(OUT, `qibla-nocompass-${scheme}.png`) });
+    await n.p.click('.sheet [data-q=close]');
+    await n.p.waitForTimeout(300);
+    await go(n.p, 'profile');
+    ok((await text(n.p, '#view [data-nav=qibla] .nav-val')) === '240°', 'Профиль → Намаз: «Кибла · 240°»');
+    ok(!n.errors.length, `без ошибок JS${n.errors.length ? `:\n      ${n.errors.join('\n      ')}` : ''}`);
+    await n.ctx.close();
+    // датчик Telegram (absolute, iPhone, истинный север): курс 240° → «Кибла ✓»
+    const c = await openApp(browser, scheme, { compass: 240.3 });
+    await go(c.p, 'today');
+    await c.p.click('[data-action=open-qibla]');
+    await c.p.waitForFunction(() => document.querySelector('.qibla-hint')?.textContent === 'Кибла ✓', null, { timeout: 5000 });
+    ok(true, 'датчик: курс 240° → «Кибла ✓»');
+    const h = await c.p.evaluate(() => window.__home);
+    ok(h.orient?.need_absolute === true && h.orient?.refresh_rate === 50 && h.lock === 1, 'DeviceOrientation.start({ refresh_rate: 50, need_absolute: true }), экран зафиксирован');
+    ok((await text(c.p, '.qibla-num')).replace(/\s/g, ' ') === '240° · 3 531 км', 'в центре «240° · 3 531 км»');
+    ok((await c.p.locator('.sheet [data-q=truenorth]').count()) === 1, 'iPhone: переключатель «У Telegram есть доступ к геопозиции»');
+    await c.p.waitForTimeout(300);
+    await c.p.screenshot({ path: join(OUT, `qibla-compass-${scheme}.png`) });
+    await c.p.click('.sheet [data-q=close]');
+    await c.p.waitForTimeout(300);
+    const h2 = await c.p.evaluate(() => window.__home);
+    ok(h2.stopped === 1 && h2.unlock === 1, 'закрыли — датчик остановлен, поворот экрана разблокирован');
+    ok(!c.errors.length, `без ошибок JS${c.errors.length ? `:\n      ${c.errors.join('\n      ')}` : ''}`);
+    await c.ctx.close();
   }
 
   console.log('Экран блокировки');
