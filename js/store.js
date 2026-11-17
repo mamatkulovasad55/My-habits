@@ -14,7 +14,7 @@ export function defaultSettings() {
     tz: '',
     tzAuto: true, // часовой пояс по городу (иначе — tz, выбранный вручную)
     profile: { niyyah: '' }, // «обо мне»: ниййа (до 300 символов)
-    privacy: { enabled: false, relock: 'now' }, // защита раздела «Воздержание»: код — только на сервере
+    privacy: { enabled: false, relock: 'now' }, // защита раздела «Детокс»: код — только на сервере
     wakeWd: '07:00',
     sleepWd: '23:00',
     wakeWe: '08:00',
@@ -83,7 +83,7 @@ function normalizeSettings(raw) {
 }
 
 // Поля верхнего уровня, которые этот код понимает. Остальные (разделы из будущих версий) сохраняются как есть.
-const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'resetAt', 'habits', 'logs', 'abstain', 'notes', 'settings', 'achievements', 'backupLog']);
+const KNOWN_KEYS = new Set(['version', 'schemaVersion', 'updatedAt', 'resetAt', 'habits', 'logs', 'abstain', 'notes', 'settings', 'achievements', 'backupLog', 'restoredAt']);
 
 // ---------- Журнал бэкапов ----------
 // data.backupLog = { bot, weekly, export } — время последнего бэкапа каждого вида (мс). Не настройка:
@@ -121,6 +121,7 @@ export function normalize(d) {
     version: 1,
     schemaVersion: Number(d.schemaVersion) || SCHEMA_VERSION,
     updatedAt: Number(d.updatedAt) || 0,
+    restoredAt: Number(d.restoredAt) || 0, // импорт бэкапа после сброса: история возвращена
     resetAt: Number(d.resetAt) || 0, // метка «Удалить все данные»: журнал и заметки старше неё отбрасываются при слиянии
     habits: Array.isArray(d.habits) ? d.habits : [],
     logs: d.logs && typeof d.logs === 'object' ? d.logs : {},
@@ -281,8 +282,16 @@ export function prepareImport(local, imported, now = Date.now()) {
   out.logs = logs;
   out.notes = notes;
   out.achievements = (Array.isArray(imported.achievements) ? imported.achievements : []).map((x) => ({ ...x, at: now })); // восстановлены после сброса
-  // настройки из файла — новее сброса: свежие метки всем полям
-  if (imported.settings && (imported.settings.updatedAt || 0) < resetAt) out.settings = stampAll(normalizeSettings(clone(imported.settings)), now);
+  out.restoredAt = now; // история восстановлена после сброса (см. firstDay в logic.js)
+  // Настройки остаются здешними (тема, город, защита «Детокса» из старого файла не возвращаются). Из файла — только то,
+  // что изменил сам сброс: долг каза (остаток и начало учёта) и ниййа, если она здесь стёрта.
+  if (imported.settings && (imported.settings.updatedAt || 0) < resetAt) {
+    const file = normalizeSettings(clone(imported.settings));
+    const s = normalizeSettings(clone(local.settings));
+    s.qada = { ...s.qada, old: file.qada.old, since: file.qada.since, vitrSince: file.qada.vitrSince };
+    if (!s.profile?.niyyah) s.profile = { ...s.profile, niyyah: file.profile?.niyyah || '' };
+    out.settings = stampAll(s, now);
+  }
   return out;
 }
 
@@ -318,6 +327,7 @@ export function merge(a, b, { serverNow } = {}) {
     schemaVersion: Math.max(a.schemaVersion, b.schemaVersion),
     updatedAt: Math.max(a.updatedAt, b.updatedAt),
     resetAt,
+    restoredAt: Math.max(a.restoredAt, b.restoredAt),
     habits,
     logs,
     abstain: mergeAbstain(a.abstain, b.abstain),
