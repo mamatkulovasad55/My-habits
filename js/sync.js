@@ -21,13 +21,25 @@ function setStatus(patch) {
   listeners.forEach((fn) => fn(status));
 }
 
-export async function api(path, body) {
-  const res = await fetch(`${WORKER_URL}${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Init-Data': initData() },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    cache: 'no-store',
-  });
+export async function api(path, body, { timeout = 0 } = {}) {
+  // timeout (мс) — для действий, которые ждут ответа на экране: зависшая сеть не должна держать их бесконечно
+  const ctl = timeout ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), timeout) : 0;
+  let res;
+  try {
+    res = await fetch(`${WORKER_URL}${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Init-Data': initData() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store',
+      signal: ctl?.signal,
+    });
+  } catch (e) {
+    if (ctl?.signal.aborted) throw new Error('Сервер не ответил за 30 секунд');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   let j = {};
   try {
     j = await res.json();

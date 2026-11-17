@@ -54,9 +54,10 @@ export function importSummary(text) {
 /**
  * Опасное действие только после бэкапа. backup() — отправка в бота (бросает при ошибке);
  * fallback(err) → 'export' | другое — что делать, если бэкап не ушёл; exportFile() — скачать экспорт;
- * run() — само действие. → true, если действие выполнено. Без бэкапа или экспорта действие не выполняется.
+ * confirmSaved() → true, если пользователь подтвердил, что файл экспорта сохранился (приложение этого не видит);
+ * run() — само действие. → true, если действие выполнено. Без бэкапа или подтверждённого экспорта — не выполняется.
  */
-export async function withBackup({ backup, fallback, exportFile, run }) {
+export async function withBackup({ backup, fallback, exportFile, confirmSaved, run }) {
   try {
     await backup();
   } catch (err) {
@@ -66,6 +67,7 @@ export async function withBackup({ backup, fallback, exportFile, run }) {
     } catch {
       return false;
     }
+    if ((await confirmSaved()) !== true) return false;
   }
   await run();
   return true;
