@@ -62,6 +62,7 @@ async function openApp(b, scheme, { locked = false } = {}) {
   const errors = [];
   const backups = [];
   let backupFails = false;
+  let backupDelay = 0;
   await ctx.route('https://telegram.org/**', (r) => r.fulfill({ body: '', contentType: 'text/javascript' }));
   await ctx.route(`${WORKER}/**`, async (r) => {
     const path = new URL(r.request().url()).pathname;
@@ -73,6 +74,7 @@ async function openApp(b, scheme, { locked = false } = {}) {
     if (path === '/api/lock/status') return r.fulfill({ json: { hasCode: locked, retryIn: 0 } });
     if (path === '/api/backup') {
       backups.push(body.reason || '');
+      if (backupDelay) await new Promise((res) => setTimeout(res, backupDelay));
       if (backupFails) return r.fulfill({ status: 502, json: { error: 'Telegram не принял файл, попробуй позже' } });
       return r.fulfill({ json: { ok: true, events: 0, at: Date.now() } });
     }
@@ -89,7 +91,7 @@ async function openApp(b, scheme, { locked = false } = {}) {
   await p.goto(BASE);
   await p.waitForSelector('#view > *');
   await p.waitForTimeout(800);
-  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v) };
+  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v), slowBackup: (ms) => (backupDelay = ms) };
 }
 
 /** Перейти на раздел с чистого листа (открытые шторки закрываются). */
@@ -131,7 +133,7 @@ const browser = await chromium.launch();
 
 for (const scheme of ['light', 'dark']) {
   console.log(`\n▶ тема: ${scheme}`);
-  const { ctx, p, errors, backups, failBackup } = await openApp(browser, scheme);
+  const { ctx, p, errors, backups, failBackup, slowBackup } = await openApp(browser, scheme);
 
   console.log('Сегодня');
   await go(p, 'today');
@@ -210,8 +212,21 @@ for (const scheme of ['light', 'dark']) {
   ok(await p.locator('.sheet [data-c=ok]').isEnabled(), 'сброс: после слова «СБРОС» — активна');
   await p.waitForTimeout(300);
   await shot(p, `reset-${scheme}`);
-  await p.click('.sheet [data-c=ok]');
-  await p.waitForTimeout(1200);
+  ok((await p.locator('.sheet .danger-list.is-gone li').count()) >= 3 && (await p.locator('.sheet .danger-list.is-kept li').count()) >= 3, 'сброс: списки «Удалится» и «Останется»');
+  // медленный бэкап: шторка ожидания, второй запуск невозможен
+  slowBackup(1500);
+  await p.press('.sheet [data-word]', 'Enter'); // «Готово» на клавиатуре подтверждает
+  await p.waitForSelector('.wait-sheet');
+  await p.waitForTimeout(400);
+  await shot(p, `backup-wait-${scheme}`);
+  const blocked = await p.evaluate(() => {
+    const r = document.querySelector('#view [data-s=reset]').getBoundingClientRect();
+    return !document.querySelector('#view').contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  });
+  ok(blocked, 'пока идёт бэкап, строки под шторкой не нажимаются');
+  await p.waitForTimeout(2200);
+  slowBackup(0);
+  ok(backups.filter((b) => b === 'reset').length === 1 && (await p.locator('.wait-sheet').count()) === 0, 'один бэкап, шторка ожидания закрылась');
   const after = await p.evaluate(() => JSON.parse(localStorage.getItem('myhabits:data:v1')));
   ok(backups.includes('reset'), 'перед сбросом — бэкап с причиной «reset»');
   ok(Object.keys(after.logs).length === 0 && after.habits.filter((h) => !h.deleted).length >= 2, 'сброс: история пуста, привычки на месте');
@@ -226,10 +241,17 @@ for (const scheme of ['light', 'dark']) {
   await p.waitForSelector('.sheet .confirm h3:text("Бэкап не отправлен")');
   await p.waitForTimeout(400);
   await shot(p, `backup-failed-${scheme}`);
+  // «Скачать экспорт и продолжить» → вопрос «Файл сохранился?»; «Отмена» — ничего не удалено
+  const dl = p.waitForEvent('download');
+  await p.click('.sheet [data-c=ok]');
+  await dl;
+  await p.waitForSelector('.sheet .confirm h3:text("Файл сохранился?")');
+  await p.waitForTimeout(400);
+  await shot(p, `export-saved-${scheme}`);
   await p.click('.sheet [data-c=cancel]');
   await p.waitForTimeout(600);
   const kept = await p.evaluate(() => JSON.parse(localStorage.getItem('myhabits:data:v1')));
-  ok(kept.habits.filter((h) => !h.deleted).length >= 2, 'бэкап не ушёл, «Отмена» — данные не удалены');
+  ok(kept.habits.filter((h) => !h.deleted).length >= 2, 'бэкап не ушёл, файл не подтверждён — данные не удалены');
   failBackup(false);
 
   console.log('Зикры');

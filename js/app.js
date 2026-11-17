@@ -107,7 +107,7 @@ function route() {
   if (sub) while (topSheet()) topSheet().close(); // ссылка «Профиль → …» из шторки
   const prev = state.route;
   state.route = name === 'settings' ? 'profile' : ROUTES.includes(name) ? name : 'today';
-  // защита «Воздержания»: ушли с раздела — блокировка (сразу или по таймеру), вернулись — проверка таймера
+  // защита «Детокса»: ушли с раздела — блокировка (сразу или по таймеру), вернулись — проверка таймера
   if (prev === 'abstain' && state.route !== 'abstain') noteLeave();
   if (state.route === 'abstain') {
     checkRelock();
@@ -1257,7 +1257,7 @@ function mountStagesSection(el, f, api) {
 }
 
 // ============================================================
-// Экран «Воздержание»
+// Экран «Детокс»
 // ============================================================
 
 function timerHTML(ms) {
@@ -1893,12 +1893,12 @@ function dataSection() {
       <button class="row" data-s="backup">${icon.cloud(20)}<span>Прислать бэкап в бота</span></button>
       <label class="row static switch-row ${locked ? 'is-off' : ''}">${icon.calendar(20)}<span class="row-main"><span>Еженедельный бэкап</span><span class="muted">${locked ? 'Не отправляется, пока включена защита «Детокса»' : 'в бота по воскресеньям в 21:00'}</span></span><input type="checkbox" class="switch" data-set-bool="backup.weekly" ${weekly && !locked ? 'checked' : ''} ${locked ? 'disabled' : ''}></label>
       <button class="row" data-s="export">${icon.archive(20)}<span>Экспорт в JSON</span></button>
-      <label class="row">${icon.undo(20)}<span>Импорт из JSON</span><input type="file" accept="application/json,.json" data-s="import" hidden></label>
+      <label class="row">${icon.download(20)}<span>Импорт из JSON</span><input type="file" accept="application/json,.json" data-s="import" hidden></label>
     </div>
     <p class="hint" data-s="last-backup">${esc(lastBackupText(d.backupLog))}</p>
     <div class="group-title danger-title">Опасная зона</div>
     <div class="card list-group">
-      <button class="row is-danger" data-s="reset">${icon.undo(20)}<span>Сбросить прогресс</span></button>
+      <button class="row is-danger" data-s="reset">${icon.reset(20)}<span>Сбросить прогресс</span></button>
       <button class="row is-danger" data-s="wipe">${icon.trash(20)}<span>Удалить все данные</span></button>
     </div>`;
 }
@@ -2370,8 +2370,9 @@ const DANGER = {
     title: 'Сбросить прогресс?',
     word: 'СБРОС',
     confirm: 'Сбросить прогресс',
-    gone: 'все отметки и зикры, заметки, достижения, история восполнения каза, попытки и чистые дни детокса',
-    kept: 'привычки с этапами, расписаниями и напоминаниями, детоксы (отсчёт — с этой минуты), архив, настройки, ниййа. Долг каза переносится в остаток числом, новые пропуски считаются с завтрашнего дня',
+    gone: ['Все отметки и зикры', 'Заметки и достижения', 'История восполнения каза', 'Попытки и чистые дни детокса'],
+    kept: ['Привычки с этапами и расписаниями', 'Детоксы — отсчёт с этой минуты', 'Архив, настройки и ниййа'],
+    note: 'Долг каза переносится в остаток числом, новые пропуски считаются с завтрашнего дня. Перед сбросом бэкап придёт в бота.',
     run: () => {
       resetProgressNow();
       updateLocal((l) => (l.timers = {}));
@@ -2384,8 +2385,9 @@ const DANGER = {
     title: 'Удалить все данные?',
     word: 'УДАЛИТЬ',
     confirm: 'Удалить всё',
-    gone: 'привычки, детоксы, вся история, зикры, заметки, ниййа и достижения — в том числе в репозитории',
-    kept: 'настройки (город, время намаза, остаток старого долга каза)',
+    gone: ['Привычки и детоксы', 'Вся история, зикры и заметки', 'Достижения и ниййа'],
+    kept: ['Настройки: город, время намаза', 'Остаток старого долга каза'],
+    note: 'Данные удалятся и в репозитории. Перед удалением бэкап придёт в бота.',
     run: () => {
       const debt = qadaDebt().byPrayer;
       resetAll(Object.fromEntries(QADA_KEYS.map((k) => [k, debt[k].oldLeft])));
@@ -2399,10 +2401,13 @@ const DANGER = {
 /** Шторка «удалится / останется». Без защиты — ввод слова; с защитой «Детокса» — код или Face ID. */
 function openDangerSheet(a) {
   const locked = protectedOn();
+  const list = (items, cls, glyph) => `<ul class="danger-list ${cls}">${items.map((t) => `<li>${glyph}<span>${esc(t)}</span></li>`).join('')}</ul>`;
   confirmSheet({
     title: a.title,
-    message: `<span class="danger-list"><b>Удалится:</b> ${esc(a.gone)}.<br><b>Останется:</b> ${esc(a.kept)}.<br>Перед этим бэкап придёт в бота.</span>`,
-    extra: locked ? '' : `<label class="danger-word"><span>Чтобы подтвердить, введи <b>${a.word}</b></span><input class="field" data-word autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done"></label>`,
+    extra: `<div class="danger-cap">Удалится</div>${list(a.gone, 'is-gone', icon.close(14))}
+      <div class="danger-cap">Останется</div>${list(a.kept, 'is-kept', icon.check(14))}
+      <p class="hint danger-note">${esc(a.note)}</p>
+      ${locked ? '' : `<label class="danger-word"><span>Чтобы подтвердить, введи <b>${a.word}</b></span><input class="field" data-word placeholder="${a.word}" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done"></label>`}`,
     confirm: a.confirm,
     destructive: true,
     mount: (el) => {
@@ -2411,6 +2416,7 @@ function openDangerSheet(a) {
       const ok = el.querySelector('[data-c=ok]');
       const check = () => (ok.disabled = inp.value.trim().toUpperCase() !== a.word);
       inp.oninput = check;
+      inp.onkeydown = (e) => e.key === 'Enter' && !ok.disabled && ok.click();
       check();
     },
     onConfirm: (el) => {
@@ -2423,34 +2429,67 @@ function openDangerSheet(a) {
 const REASON_TEXT = { reset: 'сбросом прогресса', wipe: 'удалением', import: 'импортом' };
 
 /** Бэкап в бота (с подписью reason), затем действие. Не ушёл — «Скачать экспорт и продолжить» или «Отмена». */
+let guardBusy = false; // идёт бэкап или само действие — второе не запускается
+
+/** Шторка без кнопок на время отправки бэкапа: её нельзя смахнуть, под ней ничего не нажать. */
+function waitSheet(text) {
+  return openSheet({
+    className: 'sheet-compact',
+    swipe: false,
+    render: () => `<div class="sheet-body"><div class="confirm wait-sheet" role="status"><span class="spinner" aria-hidden="true"></span><h3>${esc(text)}</h3><p>Не закрывай приложение.</p></div></div>`,
+  });
+}
+
+/** Вопрос с двумя ответами → true («да») или false (отмена, закрытие). */
+const askSheet = (opts) => new Promise((resolve) => {
+  let yes = false;
+  confirmSheet({ ...opts, onConfirm: () => void (yes = true), onClose: () => resolve(yes) });
+});
+
+/** Бэкап в бота (с подписью reason), затем действие. Не ушёл — «Скачать экспорт и продолжить» или «Отмена». */
 function guarded(reason, run) {
+  if (guardBusy) return Promise.resolve(false);
+  guardBusy = true;
+  let wait = null;
+  const closeWait = () => {
+    wait?.close();
+    wait = null;
+  };
   return withBackup({
     backup: async () => {
       if (navigator.onLine === false) throw new Error('Нет сети');
-      toast('Отправляю бэкап в бота…', { ms: 8000 });
-      const r = await sync.api('/api/backup', { reason, data: getData() });
+      wait = waitSheet('Отправляю бэкап в бота…');
+      const r = await sync.api('/api/backup', { reason, data: getData() }, { timeout: 30000 });
       // старый сервер игнорирует данные и причину (нет at) — такой бэкап не считаем
       if (!r?.ok || !r.at) throw new Error('Сервер ещё не обновлён — бэкап с подписью не отправлен');
       noteBackup('bot', r.at);
     },
-    fallback: (err) => new Promise((resolve) => {
-      document.querySelector('.toast')?.classList.remove('is-shown'); // «Отправляю бэкап…» не закрывает кнопки
-      let choice = '';
-      confirmSheet({
+    fallback: (err) => {
+      closeWait();
+      return askSheet({
         title: 'Бэкап не отправлен',
         message: `${esc(err?.message || 'Ошибка сервера')}. Без бэкапа действие не выполняется: можно скачать экспорт и продолжить.`,
         confirm: 'Скачать экспорт и продолжить',
-        onConfirm: () => {
-          choice = 'export';
-        },
-        onClose: () => resolve(choice),
-      });
-    }),
+      }).then((yes) => (yes ? 'export' : ''));
+    },
     exportFile: exportJSON,
-    run,
+    // приложение не видит, сохранился ли файл (в Telegram скачивание может не сработать) — спрашиваем
+    confirmSaved: () => askSheet({
+      title: 'Файл сохранился?',
+      message: `Проверь, что файл <b>my-habits-${esc(todayKey())}.json</b> появился в загрузках. Без него восстановить данные будет нельзя.`,
+      confirm: 'Да, продолжить',
+      destructive: true,
+    }),
+    run: () => {
+      closeWait();
+      return run();
+    },
   }).then((done) => {
     if (!done) toast('Отменено — данные не изменены');
-  }, (err) => toast(err?.message || `Не удалось выполнить действие перед ${REASON_TEXT[reason]}`));
+  }, (err) => toast(err?.message || `Не удалось выполнить действие перед ${REASON_TEXT[reason]}`)).finally(() => {
+    closeWait();
+    guardBusy = false;
+  });
 }
 
 /** Превью файла бэкапа перед импортом. */
@@ -2458,11 +2497,11 @@ function openImportPreview(sum) {
   const day = (k) => (k ? fmtDateShort(parseKey(k)) : '');
   const rows = [
     ['Дата файла', sum.at ? fmtDateTime(new Date(sum.at)) : 'не указана'],
-    ['Версия схемы', String(sum.schema)],
     ['Привычки', String(sum.habits)],
     ['Детоксы', String(sum.abstain)],
     ['История', sum.from ? `${day(sum.from)} — ${day(sum.to)}` : 'нет отметок'],
     ['Достижения', String(sum.achievements)],
+    ['Версия схемы', String(sum.schema)],
   ];
   confirmSheet({
     title: 'Импортировать бэкап?',
@@ -2566,7 +2605,7 @@ function exportJSON() {
 }
 
 // ============================================================
-// Защита «Воздержания»: экран блокировки, подтверждение кодом, задание кода
+// Защита «Детокса»: экран блокировки, подтверждение кодом, задание кода
 // ============================================================
 
 /** Запрос к /api/lock/* — возвращает тело ответа вместе с HTTP-статусом (нужны retryIn и hasCode при ошибке). */
@@ -2907,7 +2946,7 @@ onLockChange((locked) => {
 // Достижения: карточка в Профиле, экран, выдача
 // ============================================================
 
-/** Значок виден? Группа «Воздержание» скрыта, пока раздел защищён и заблокирован. */
+/** Значок виден? Группа «Детокс» скрыта, пока раздел защищён и заблокирован. */
 const badgeVisible = (b) => !(groupOf(b)?.private && isLocked());
 const MONTH_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const fmtEarned = (k) => {
@@ -3093,7 +3132,7 @@ async function renderGate() {
   // старая версия хранила токен GitHub в браузере — удаляем его с устройства
   storageRemove('myhabits:sync:v1');
   storageRemove('myhabits:pushkey:v1');
-  // при включённой защите «Воздержания» экспорт без входа через Telegram не предлагаем (код проверить нельзя)
+  // при включённой защите «Детокса» экспорт без входа через Telegram не предлагаем (код проверить нельзя)
   const hasLocal = (habitsAll().length || abstainAll().length) && !getData().settings.privacy?.enabled;
   renderBlocked(
     'Трекер теперь в Telegram',
@@ -3604,7 +3643,7 @@ if (!tg.inTelegram()) {
   route();
   recoverDhikr();
   window.Telegram?.WebApp?.onEvent?.('deactivated', commitDhikr);
-  // защита «Воздержания»: свернули — блокировка (сразу или по таймеру); вернулись — проверка таймера
+  // защита «Детокса»: свернули — блокировка (сразу или по таймеру); вернулись — проверка таймера
   window.Telegram?.WebApp?.onEvent?.('deactivated', () => noteLeave());
   // вернулись в приложение (например, из чата с ботом после «Сбросить код») — сразу перепроверить статус кода
   const onBack = () => {

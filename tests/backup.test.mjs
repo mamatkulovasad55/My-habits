@@ -40,6 +40,7 @@ import { importSummary, withBackup, lastBackupText } from '../js/backup.js';
     backup: async () => log.push('backup'),
     fallback: async () => (log.push('ask'), 'cancel'),
     exportFile: async () => log.push('export'),
+    confirmSaved: async () => (log.push('saved?'), true),
     run: async () => log.push('run'),
     ...over,
   });
@@ -53,7 +54,9 @@ import { importSummary, withBackup, lastBackupText } from '../js/backup.js';
   assert.deepEqual(log.splice(0), ['backup', 'ask'], 'бэкап не ушёл, «Отмена» — действие не выполнено');
   let err;
   assert.equal(await withBackup(mk({ backup: fail, fallback: async (e) => ((err = e), 'export') })), true);
-  assert.deepEqual(log.splice(0), ['backup', 'export', 'run'], '«Скачать экспорт и продолжить»');
+  assert.deepEqual(log.splice(0), ['backup', 'export', 'saved?', 'run'], '«Скачать экспорт и продолжить» → «Файл сохранился» → действие');
+  assert.equal(await withBackup(mk({ backup: fail, fallback: async () => 'export', confirmSaved: async () => false })), false);
+  assert.deepEqual(log.splice(0), ['backup', 'export'], 'файл не сохранился — действие не выполнено');
   assert.equal(err.message, 'Нет сети', 'ошибка передана в шторку');
   const exportFail = async () => {
     throw new Error('disk');

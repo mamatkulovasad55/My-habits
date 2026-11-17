@@ -122,3 +122,40 @@ for (const m of [merge(reset, restored), merge(restored, reset), merge(restored,
   assert.equal(m.logs.namaz['2026-11-10'].v, 6);
 }
 console.log('✓ импорт бэкапа после сброса: журналы, достижения, детокс и долг каза вернулись и не пропадают при синхронизации');
+
+// 6. Импорт после сброса не трогает здешние настройки: тема, город и защита «Детокса» остаются, долг каза возвращается
+{
+  const local = clone(reset);
+  local.settings.theme = 'dark';
+  local.settings.privacy = { ...local.settings.privacy, enabled: true };
+  local.settings.prayer = { ...local.settings.prayer, city: 'Самарканд' };
+  local.settings._t = { ...local.settings._t, theme: LATER, 'privacy.enabled': LATER, 'prayer.city': LATER };
+  const m = merge(local, prepareImport(local, clone(server), LATER + 1000));
+  assert.equal(m.settings.theme, 'dark');
+  assert.equal(m.settings.privacy.enabled, true, 'импорт старого файла не выключает защиту');
+  assert.equal(m.settings.prayer.city, 'Самарканд');
+  assert.deepEqual(m.settings.qada.old, server.settings.qada.old, 'остаток долга — из файла');
+  assert.equal(m.settings.qada.since, server.settings.qada.since);
+  assert.equal(m.settings.profile.niyyah, 'Ради Аллаха');
+  console.log('✓ импорт после сброса: настройки остаются здешними, из файла — только долг каза');
+}
+
+// 7. Намаз без единой отметки: долг после «сброс → импорт» равен долгу до сброса
+{
+  const bare = full();
+  delete bare.logs.namaz;
+  replaceData(clone(bare));
+  setNow(RESET);
+  const was = qadaDebt().total;
+  resetProgressNow(new Date(RESET));
+  assert.equal(qadaDebt().total, was);
+  const r = clone(getData());
+  setNow(LATER);
+  replaceData(merge(r, prepareImport(r, clone(bare), LATER)));
+  assert.equal(qadaDebt().total, was, 'долг после импорта тот же');
+  // второй сброс после импорта снова считает историю с дня сброса
+  setNow(LATER + 60000);
+  resetProgressNow(new Date(LATER + 60000));
+  assert.equal(qadaDebt().total, was);
+  console.log('✓ намаз без отметок: долг каза совпадает после сброса, импорта и повторного сброса');
+}
