@@ -3967,6 +3967,10 @@ if (!tg.inTelegram()) {
   if (tg.startScreen() === 'checkin') setTimeout(openCheckin, 300);
 }
 
+// щипок: iOS в некоторых версиях игнорирует user-scalable=no в viewport
+document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+document.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
