@@ -272,6 +272,27 @@ a { color: inherit; text-decoration: none; }
 .list { display: flex; flex-direction: column; gap: 10px; }
 .list.is-dim .hcard { opacity: 0.6; }
 
+/* Нижний блок «Сегодня»: «Вечерний чек-ин», «Новая привычка» */
+.today-actions { display: grid; gap: var(--ios-space-m); margin-top: var(--ios-space-xl); }
+.today-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: calc(var(--ios-space-xxxl) + var(--ios-space-xxs));
+  padding: 0 var(--ios-space-xl);
+  border-radius: var(--ios-radius-full);
+  background: var(--card);
+  color: var(--accent);
+  font-size: var(--ios-headline);
+  line-height: var(--ios-headline-lh);
+  letter-spacing: var(--ios-headline-ls);
+  font-weight: 600;
+  text-align: center;
+  transition: transform 0.15s var(--ease), opacity 0.2s, background 0.25s;
+}
+.today-btn:active { transform: scale(0.97); }
+
 .hcard {
   display: flex;
   align-items: center;

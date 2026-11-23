@@ -179,7 +179,6 @@ function viewToday() {
         <div class="empty-emoji">🌱</div>
         <h2>Начни с одной привычки</h2>
         <p>Маленькие ежедневные шаги складываются в большие перемены.</p>
-        <button class="btn btn-primary" data-action="add-habit">${icon.plus(18)} Новая привычка</button>
       </div>`
     : '';
 
@@ -194,7 +193,6 @@ function viewToday() {
         ${!isToday ? `<button class="pill" data-action="go-today">Сегодня</button>` : ''}
         <button class="icon-btn dhikr-btn" data-action="open-qibla" aria-label="Кибла">${icon.compass(20)}</button>
         <button class="icon-btn dhikr-btn" data-action="open-dhikr" aria-label="Зикр">${icon.beads(20)}</button>
-        <button class="icon-btn" data-action="add-habit" aria-label="Новая привычка">${icon.plus(22)}</button>
       </div>
       <input type="date" id="date-picker" class="visually-hidden" max="${todayKey()}" value="${key}" tabindex="-1">
     </header>
@@ -208,8 +206,11 @@ function viewToday() {
     ${other.length ? `<h3 class="section-title">Не по расписанию</h3><section class="list is-dim">${other.map((h) => habitCard(h, day)).join('')}</section>` : ''}
     ${habits.length > 1 ? `<div class="list-tools"><button class="link-btn small" data-action="reorder">Изменить порядок</button>${isToday ? `<button class="link-btn small" data-action="checkin">🌙 Вечерний чек-ин</button>` : ''}</div>` : ''}
 `}
-    ${isToday && !state.reorder ? homeHint() : ''}
     ${empty}
+    ${state.reorder ? '' : `<div class="today-actions">
+      <button class="today-btn" data-action="add-habit">Новая привычка</button>
+    </div>`}
+    ${isToday && !state.reorder ? homeHint() : ''}
   `;
 }
 
