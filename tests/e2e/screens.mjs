@@ -297,7 +297,7 @@ for (const scheme of ['light', 'dark']) {
     const lifted = await q.evaluate(() => getComputedStyle(document.querySelector('.hcard.is-lifted')).transform);
     ok(/matrix\(1\.03/.test(lifted), `карточка увеличена (${lifted})`);
     await q.screenshot({ path: join(OUT, 'today-drag-light.png') });
-    const target = c2.y + c2.h / 2 + 8;
+    const target = c2.y - c.h / 2 + 10; // нижний край поднятой прошёл середину следующей
     for (let y = c.y; y <= target; y += 12) {
       await touch('touchMove', c.x, y);
       await q.waitForTimeout(16);
@@ -323,6 +323,31 @@ for (const scheme of ['light', 'dark']) {
     const all = [...r.habits].filter((h) => !h.deleted).sort((a, b) => a.order - b.order).map((h) => h.id);
     ok(all.indexOf('fri') === 2, `привычка не по расписанию на прежнем месте (${all.join(', ')})`);
     ok(r.notes?.['2026-11-15']?.text === 'старая заметка', 'старые заметки на месте');
+
+    // высокая карточка (с этапами) мимо низкой крайней: уходит в начало (или в конец) списка
+    {
+      const cur = await order();
+      const hs = await q.evaluate((ids) => ids.map((id) => document.querySelector(`.hcard[data-hid="${id}"]`).getBoundingClientRect().height), cur);
+      const ti = hs.indexOf(Math.max(...hs.slice(1)), 1);
+      const up = hs[0] < hs[ti];
+      const ti2 = up ? ti : hs.indexOf(Math.max(...hs.slice(0, -1)));
+      const tall = cur[ti2];
+      const edge = cur[up ? 0 : cur.length - 1];
+      ok(up || hs[hs.length - 1] < hs[ti2], `есть высокая карточка и низкая крайняя (${hs.map(Math.round).join(', ')})`);
+      const a = await center(`.hcard[data-hid="${tall}"]`);
+      const z = await center(`.hcard[data-hid="${edge}"]`);
+      await touch('touchStart', a.x, a.y);
+      await q.waitForTimeout(470);
+      const endY = up ? z.y - z.h : z.y + z.h;
+      for (let y = a.y; up ? y >= endY : y <= endY; y += up ? -12 : 12) {
+        await touch('touchMove', a.x, y);
+        await q.waitForTimeout(16);
+      }
+      await touch('touchEnd');
+      await q.waitForTimeout(900);
+      const got = await order();
+      ok(got[up ? 0 : got.length - 1] === tall, `высокая карточка обошла низкую: ${got.join(', ')}`);
+    }
 
     // touchcancel посреди жеста: откат, ничего не сохранено
     const mid = await order();
