@@ -59,6 +59,36 @@ export function haptic(kind = 'light') {
   }
 }
 
+/** Лёгкий щелчок при смене позиции (перетаскивание). */
+export function hapticSelection() {
+  try {
+    W()?.HapticFeedback?.selectionChanged();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * На время жеста запретить Telegram сворачивать приложение свайпом вниз. Если свайпы уже выключены (init делает
+ * это глобально) — ничего не трогаем. → функция, возвращающая как было.
+ */
+export function holdVerticalSwipes() {
+  const w = W();
+  if (w?.isVerticalSwipesEnabled !== true) return () => {};
+  try {
+    w.disableVerticalSwipes();
+  } catch {
+    return () => {};
+  }
+  return () => {
+    try {
+      w.enableVerticalSwipes();
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
 /** Экран, с которого открыли приложение (например ?screen=checkin). */
 export const startScreen = () => new URLSearchParams(location.search).get('screen') || W()?.initDataUnsafe?.start_param || '';
 

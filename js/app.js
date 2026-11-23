@@ -22,7 +22,7 @@ import {
 import { dayContext, stagesForDay, currentStage, timeLabel, timeStats, overallHours, parseHM, stageStatus, stageExpired, prayerNotStarted, stageMark, prayerKeyOf, isNamazHabit, qadaDebt, namazStats, QADA_KEYS, QADA_NAMES } from './schedule.js';
 import { sunAltAz, PRAYERS, PRAYER_NAME, CITIES, fmtMin, cityTz, autoTz, tzLabel, tzMismatch, offsetLabel } from './prayer.js';
 import { HIJRI_MONTHS, HIJRI_OFFSET_MIN, HIJRI_OFFSET_MAX, toHijri, hijriAt, formatHijri, hijriEngine, monthLength } from './hijri.js';
-import { forbiddenWindows } from './logic.js';
+import { forbiddenWindows, mergeVisibleOrder } from './logic.js';
 import { createCounter, recoverPending, dhikrTotals, dhikrSums, dhikrAllTime, roundView, targetFor, collectionItems, collectionIsNow, DHIKR_COLLECTIONS, DHIKR_TARGETS, DHIKR_PENDING_KEY } from './dhikr.js';
 import { CALIB_KEYS, calibrationReport, applyCalibration, withRef, withoutRef, prayerSource, timesFor } from './calibrate.js';
 import {
@@ -70,6 +70,10 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyThe
 
 function render() {
   if (!tg.inTelegram()) return;
+  if (dragActive()) {
+    dragRenderPending = true; // карточка в руке — перерисуем, когда отпустят
+    return;
+  }
   applyTheme();
   const scrollY = window.scrollY;
   tzRefocus = Boolean(document.activeElement?.matches?.('[data-tz-search]'));
@@ -84,7 +88,6 @@ function render() {
   if (state.route === 'profile') mountProfile();
   if (state.route === 'abstain') mountLockScreen();
   if (state.route === 'today') {
-    mountReorder();
   }
   refreshLiveSheets();
   syncBackButton();
@@ -115,7 +118,6 @@ function route() {
   state.sub = state.route === 'profile' && PROFILE_SUBS[sub] ? sub : null;
   if (state.route === 'profile' && !state.sub) refreshHomeStatus(); // при каждом открытии Профиля (иконку могли удалить)
   if (state.sub !== 'tz') tzQuery = '';
-  state.reorder = false;
   render();
 }
 
@@ -199,18 +201,16 @@ function viewToday() {
     <nav class="week-strip">${strip}</nav>
     ${abstChips}
     ${summary}
-    ${dkey(state.day) === todayKey() && !state.reorder ? tzBanner() : ''}
+    ${dkey(state.day) === todayKey() ? tzBanner() : ''}
     ${namazBanner()}
-    ${state.reorder ? reorderList() : `
     ${due.length ? `<section class="list">${due.map((h) => habitCard(h, day)).join('')}</section>` : ''}
     ${other.length ? `<h3 class="section-title">Не по расписанию</h3><section class="list is-dim">${other.map((h) => habitCard(h, day)).join('')}</section>` : ''}
-`}
     ${empty}
-    ${state.reorder ? '' : `<div class="today-actions">
+    <div class="today-actions">
       ${isToday ? '<button class="today-btn" data-action="checkin">Вечерний чек-ин</button>' : ''}
       <button class="today-btn" data-action="add-habit">Новая привычка</button>
-    </div>`}
-    ${isToday && !state.reorder ? homeHint() : ''}
+    </div>
+    ${isToday ? homeHint() : ''}
   `;
 }
 
@@ -300,7 +300,7 @@ function tzBanner() {
 }
 
 function namazBanner() {
-  if (state.reorder || dkey(state.day) !== todayKey()) return '';
+  if (dkey(state.day) !== todayKey()) return '';
   if (storageGet('myhabits:namaz-banner') === 'hide') return '';
   const found = findNamazHabits();
   if (found.length < 3) return '';
@@ -329,60 +329,196 @@ function mergeNamaz() {
   toast('Готово: «Намаз» — 5 намазов и Витр');
 }
 
-// ---------- Порядок привычек (перетаскивание) ----------
+// ---------- Порядок привычек: удержание карточки и перетаскивание ----------
+// Удержание 400 мс поднимает карточку; палец ушёл раньше больше чем на 10 px — это прокрутка, жест отменяется.
+// Карточка ходит по вертикали внутри своего списка, соседи раздвигаются, у краёв экрана список прокручивается сам.
+// Отпустили — порядок сохраняется (reorderHabits, синхронизация прежняя). touchcancel / сворачивание — откат.
 
-function reorderList() {
-  return `<div class="group-title">Перетащи за ≡, чтобы изменить порядок</div>
-    <section class="card list-group reorder" id="reorder">${habitsActive()
-      .map((h) => `<div class="row static ro-row" data-hid="${h.id}"><span class="emoji-chip" style="--c:${h.color}">${esc(h.emoji)}</span><div class="row-main"><b>${esc(h.name)}</b></div><span class="handle" aria-label="Перетащить">≡</span></div>`)
-      .join('')}</section>
-    <button class="btn btn-primary btn-block" data-action="reorder-done">Готово</button>`;
+const DRAG = { HOLD: 400, SLOP: 10, ANIM: 200, EDGE: 64, SPEED: 14 };
+let drag = null; // { phase: 'press' | 'lifted' | 'drop', ... }
+let dragRenderPending = false;
+let suppressClickUntil = 0;
+
+function dragActive() {
+  return Boolean(drag && drag.phase !== 'press');
 }
 
-function mountReorder() {
-  const box = document.getElementById('reorder');
-  if (!box) return;
-  box.querySelectorAll('.handle').forEach((handle) => {
-    handle.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      const row = handle.closest('.ro-row');
-      const rows = [...box.querySelectorAll('.ro-row')];
-      const from = rows.indexOf(row);
-      const hgt = row.getBoundingClientRect().height;
-      const startY = e.clientY;
-      let to = from;
-      row.classList.add('is-dragging');
-      handle.setPointerCapture(e.pointerId);
-      const move = (ev) => {
-        const dy = ev.clientY - startY;
-        row.style.transform = `translateY(${dy}px)`;
-        to = clamp(from + Math.round(dy / hgt), 0, rows.length - 1);
-        rows.forEach((r, i) => {
-          if (r === row) return;
-          let shift = 0;
-          if (from < to && i > from && i <= to) shift = -hgt;
-          if (from > to && i < from && i >= to) shift = hgt;
-          r.style.transform = shift ? `translateY(${shift}px)` : '';
-        });
-      };
-      const up = () => {
-        handle.removeEventListener('pointermove', move);
-        handle.removeEventListener('pointerup', up);
-        handle.removeEventListener('pointercancel', up);
-        rows.forEach((r) => (r.style.transform = ''));
-        row.classList.remove('is-dragging');
-        if (to !== from) {
-          const ids = rows.map((r) => r.dataset.hid);
-          ids.splice(to, 0, ids.splice(from, 1)[0]);
-          haptic();
-          reorderHabits(ids);
-        }
-      };
-      handle.addEventListener('pointermove', move);
-      handle.addEventListener('pointerup', up);
-      handle.addEventListener('pointercancel', up);
-    });
+function dragPress(card, x, y, kind) {
+  dragCancel();
+  const list = card.closest('.list');
+  if (!list || list.querySelectorAll('.hcard').length < 2) return;
+  drag = { phase: 'press', card, list, kind, x0: x, y0: y, y, timer: setTimeout(dragLift, DRAG.HOLD) };
+}
+
+function dragLift() {
+  const d = drag;
+  if (!d || d.phase !== 'press' || !d.card.isConnected) return dragCancel();
+  const cards = [...d.list.querySelectorAll('.hcard')];
+  const gap = parseFloat(getComputedStyle(d.list).rowGap) || 0;
+  Object.assign(d, {
+    phase: 'lifted',
+    cards,
+    from: cards.indexOf(d.card),
+    rects: cards.map((c) => c.getBoundingClientRect()),
+    gap,
+    scroll0: window.scrollY,
+    restoreSwipes: tg.holdVerticalSwipes(),
   });
+  d.to = d.from;
+  d.h = d.rects[d.from].height;
+  d.list.classList.add('is-sorting');
+  d.card.classList.add('is-lifted');
+  tg.haptic('medium');
+  dragPaint();
+  d.raf = requestAnimationFrame(dragAutoScroll);
+}
+
+function dragMove(x, y, e) {
+  const d = drag;
+  if (!d) return;
+  if (d.phase === 'press') {
+    if (Math.hypot(x - d.x0, y - d.y0) > DRAG.SLOP) dragCancel(); // прокрутка
+    return;
+  }
+  if (d.phase !== 'lifted') return;
+  if (e?.cancelable) e.preventDefault(); // поднята — страница не прокручивается
+  d.y = y;
+  dragPaint();
+}
+
+/** Сдвиг поднятой карточки (в координатах страницы) и раздвигание соседей. */
+function dragPaint() {
+  const d = drag;
+  const dy = d.y - d.y0 + (window.scrollY - d.scroll0);
+  const minDy = d.rects[0].top - d.rects[d.from].top;
+  const maxDy = d.rects[d.rects.length - 1].bottom - d.rects[d.from].bottom;
+  const shift = clamp(dy, minDy, maxDy);
+  const mid = d.rects[d.from].top + d.h / 2 + shift;
+  let to = 0;
+  d.rects.forEach((r, i) => {
+    if (i !== d.from && r.top + r.height / 2 < mid) to++;
+  });
+  if (to !== d.to) {
+    d.to = to;
+    tg.hapticSelection();
+  }
+  const step = d.h + d.gap;
+  d.cards.forEach((c, i) => {
+    if (i === d.from) return;
+    let s = 0;
+    if (d.from < to && i > d.from && i <= to) s = -step;
+    if (d.from > to && i < d.from && i >= to) s = step;
+    c.style.transform = s ? `translateY(${s}px)` : '';
+  });
+  d.card.style.transform = `translateY(${shift}px) scale(1.03)`;
+}
+
+/** У верхнего края и у таб-бара список прокручивается сам, пока палец там. */
+function dragAutoScroll() {
+  const d = drag;
+  if (!d || d.phase !== 'lifted') return;
+  const top = DRAG.EDGE;
+  const bottom = (document.querySelector('.tabbar')?.getBoundingClientRect().top ?? window.innerHeight) - DRAG.EDGE;
+  let v = 0;
+  if (d.y < top) v = -DRAG.SPEED * Math.min(1, (top - d.y) / DRAG.EDGE);
+  else if (d.y > bottom) v = DRAG.SPEED * Math.min(1, (d.y - bottom) / DRAG.EDGE);
+  if (v) {
+    const before = window.scrollY;
+    window.scrollBy(0, v);
+    if (window.scrollY !== before) dragPaint();
+  }
+  d.raf = requestAnimationFrame(dragAutoScroll);
+}
+
+function dragEnd() {
+  const d = drag;
+  if (!d) return;
+  if (d.phase === 'press') return dragCancel();
+  if (d.phase !== 'lifted') return;
+  d.phase = 'drop';
+  cancelAnimationFrame(d.raf);
+  suppressClickUntil = Date.now() + 600; // тап после удержания не отмечает привычку
+  // встать в слот: сумма высот тех, кого обошли (transform — от исходного места в странице, прокрутка не важна)
+  let off = 0;
+  if (d.to > d.from) for (let i = d.from + 1; i <= d.to; i++) off += d.rects[i].height + d.gap;
+  if (d.to < d.from) for (let i = d.to; i < d.from; i++) off -= d.rects[i].height + d.gap;
+  d.card.classList.remove('is-lifted');
+  d.card.classList.add('is-dropping');
+  d.card.style.transform = `translateY(${off}px)`;
+  tg.haptic('light');
+  const ids = d.cards.map((c) => c.dataset.hid);
+  const moved = d.to !== d.from;
+  if (moved) ids.splice(d.to, 0, ids.splice(d.from, 1)[0]);
+  d.done = setTimeout(() => {
+    dragFinish();
+    if (moved) reorderHabits(mergeVisibleOrder(habitsAll().map((h) => h.id), ids));
+  }, DRAG.ANIM + 20);
+}
+
+/** Снять стили жеста. Порядок карточек в DOM не менялся — без сохранения всё как было. */
+function dragFinish() {
+  const d = drag;
+  drag = null;
+  if (!d) return;
+  clearTimeout(d.timer);
+  clearTimeout(d.done);
+  cancelAnimationFrame(d.raf);
+  d.restoreSwipes?.();
+  d.list?.classList.remove('is-sorting');
+  d.card?.classList.remove('is-lifted', 'is-dropping');
+  (d.cards || [d.card]).forEach((c) => c && (c.style.transform = ''));
+  if (dragRenderPending) {
+    dragRenderPending = false;
+    render();
+  }
+}
+
+/** touchcancel, сворачивание Mini App: вернуть исходный порядок, ничего не сохранять. */
+function dragCancel() {
+  if (!drag) return;
+  if (drag.phase === 'lifted' || drag.phase === 'drop') suppressClickUntil = Date.now() + 600;
+  dragFinish();
+}
+
+function mountCardDrag() {
+  const cardOf = (t) => (state.route === 'today' ? t.closest?.('.list .hcard') : null);
+  view.addEventListener('touchstart', (e) => {
+    suppressClickUntil = 0; // новое касание — запрет клика от прошлого жеста больше не нужен
+    const card = cardOf(e.target);
+    if (!card || e.touches.length > 1) return dragCancel();
+    const t = e.touches[0];
+    dragPress(card, t.clientX, t.clientY, 'touch');
+  }, { passive: true });
+  // не passive: после подъёма preventDefault держит страницу (и iOS не начинает прокрутку)
+  view.addEventListener('touchmove', (e) => {
+    if (!drag || drag.kind !== 'touch') return;
+    if (e.touches.length > 1) return dragCancel();
+    const t = e.touches[0];
+    dragMove(t.clientX, t.clientY, e);
+  }, { passive: false });
+  view.addEventListener('touchend', () => drag?.kind === 'touch' && dragEnd());
+  view.addEventListener('touchcancel', () => drag?.kind === 'touch' && dragCancel());
+  // мышь (Telegram Desktop)
+  view.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    suppressClickUntil = 0;
+    const card = cardOf(e.target);
+    if (card) dragPress(card, e.clientX, e.clientY, 'mouse');
+  });
+  window.addEventListener('pointermove', (e) => drag?.kind === 'mouse' && dragMove(e.clientX, e.clientY, e));
+  window.addEventListener('pointerup', () => drag?.kind === 'mouse' && dragEnd());
+  window.addEventListener('pointercancel', () => drag?.kind === 'mouse' && dragCancel());
+  view.addEventListener('contextmenu', (e) => cardOf(e.target) && e.preventDefault());
+  // клик после удержания (и после отмены поднятой карточки) не доходит до отметки и открытия карточки
+  document.addEventListener('click', (e) => {
+    if (Date.now() < suppressClickUntil) {
+      e.stopPropagation();
+      e.preventDefault();
+      suppressClickUntil = 0;
+    }
+  }, true);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && dragCancel());
+  window.Telegram?.WebApp?.onEvent?.('deactivated', dragCancel);
 }
 
 // ---------- Вечерний чек-ин ----------
@@ -3824,8 +3960,6 @@ document.addEventListener('click', (e) => {
       }
       return;
     }
-    case 'reorder': state.reorder = true; return render();
-    case 'reorder-done': state.reorder = false; return render();
     case 'checkin': return openCheckin();
     case 'locate-city': return locateCity();
     case 'merge-namaz': return mergeNamaz();
@@ -3963,6 +4097,8 @@ if (!tg.inTelegram()) {
   sync.initSync();
   if (tg.startScreen() === 'checkin') setTimeout(openCheckin, 300);
 }
+
+mountCardDrag(); // порядок привычек удержанием карточки на «Сегодня»
 
 // щипок: iOS в некоторых версиях игнорирует user-scalable=no в viewport
 document.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });

@@ -431,3 +431,13 @@ export function overallHeatValue() {
   };
 }
 
+
+/**
+ * Перестановка части списка: видимые (visibleNew — их новый порядок) встают на места, которые видимые занимали
+ * в полном списке allIds; остальные (скрытые сегодня по расписанию, архив) не двигаются. → новый полный порядок.
+ */
+export function mergeVisibleOrder(allIds, visibleNew) {
+  const set = new Set(visibleNew);
+  let k = 0;
+  return allIds.map((id) => (set.has(id) ? visibleNew[k++] : id));
+}
