@@ -220,6 +220,8 @@ for (const scheme of ['light', 'dark']) {
       return [Math.round(a.top - last.bottom), Math.round(b.top - a.bottom)];
     });
     ok(gaps[0] === 24 && gaps[1] === 12, `отступы 24 / 12 (${gaps})`);
+    const bgs = await p.evaluate(() => [...document.querySelectorAll('.today-btn')].map((b) => getComputedStyle(b).backgroundColor));
+    ok(bgs[0] !== bgs[1], `«Новая привычка» отличается от «Вечернего чек-ина» (${bgs.join(' / ')})`);
     await p.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
     await p.waitForTimeout(200);
     const clear = await p.evaluate(() => {

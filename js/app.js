@@ -208,7 +208,7 @@ function viewToday() {
     ${empty}
     <div class="today-actions">
       ${isToday ? '<button class="today-btn" data-action="checkin">Вечерний чек-ин</button>' : ''}
-      <button class="today-btn" data-action="add-habit">Новая привычка</button>
+      <button class="today-btn is-tinted" data-action="add-habit">Новая привычка</button>
     </div>
     ${isToday ? homeHint() : ''}
   `;
