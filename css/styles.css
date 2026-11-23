@@ -1018,7 +1018,6 @@ select.field.compact { padding-right: 30px; }
 .banner-title { font-weight: 600; font-size: var(--ios-headline); letter-spacing: var(--ios-headline-ls); line-height: var(--ios-headline-lh); }
 .banner p { margin: 6px 0 0; color: var(--label-2); font-size: var(--ios-subheadline); line-height: var(--ios-subheadline-lh); letter-spacing: var(--ios-subheadline-ls); }
 
-.note-card { padding: 4px 6px; }
 .note-input {
   width: 100%;
   border: 0;

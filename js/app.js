@@ -85,8 +85,6 @@ function render() {
   if (state.route === 'abstain') mountLockScreen();
   if (state.route === 'today') {
     mountReorder();
-    const note = document.getElementById('day-note');
-    if (note) note.onchange = () => setNote(dkey(state.day), note.value.trim());
   }
   refreshLiveSheets();
   syncBackButton();
@@ -209,9 +207,7 @@ function viewToday() {
     ${due.length ? `<section class="list">${due.map((h) => habitCard(h, day)).join('')}</section>` : ''}
     ${other.length ? `<h3 class="section-title">Не по расписанию</h3><section class="list is-dim">${other.map((h) => habitCard(h, day)).join('')}</section>` : ''}
     ${habits.length > 1 ? `<div class="list-tools"><button class="link-btn small" data-action="reorder">Изменить порядок</button>${isToday ? `<button class="link-btn small" data-action="checkin">🌙 Вечерний чек-ин</button>` : ''}</div>` : ''}
-    ${habits.length || abst.length ? `
-      <div class="group-title">Заметка дня</div>
-      <div class="card pad note-card"><textarea class="note-input" id="day-note" rows="2" placeholder="Как прошёл день? Что помогло, что мешало…">${esc(getData().notes[key]?.text || '')}</textarea></div>` : ''}`}
+`}
     ${isToday && !state.reorder ? homeHint() : ''}
     ${empty}
   `;
