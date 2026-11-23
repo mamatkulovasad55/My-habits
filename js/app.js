@@ -208,7 +208,7 @@ function viewToday() {
     ${empty}
     <div class="today-actions">
       ${isToday ? '<button class="today-btn" data-action="checkin">Вечерний чек-ин</button>' : ''}
-      <button class="today-btn" data-action="add-habit">Новая привычка</button>
+      <button class="today-btn is-tinted" data-action="add-habit">Новая привычка</button>
     </div>
     ${isToday ? homeHint() : ''}
   `;
@@ -393,11 +393,13 @@ function dragPaint() {
   const minDy = d.rects[0].top - d.rects[d.from].top;
   const maxDy = d.rects[d.rects.length - 1].bottom - d.rects[d.from].bottom;
   const shift = clamp(dy, minDy, maxDy);
-  const mid = d.rects[d.from].top + d.h / 2 + shift;
-  let to = 0;
-  d.rects.forEach((r, i) => {
-    if (i !== d.from && r.top + r.height / 2 < mid) to++;
-  });
+  // как в iOS: вниз — по нижнему краю поднятой карточки, вверх — по верхнему; соседа обходим, когда край прошёл его середину.
+  // (по середине карточки высокая карточка не могла бы обойти низкую последнюю — ход ограничен краем списка)
+  const r0 = d.rects[d.from];
+  const mid = (r) => r.top + r.height / 2;
+  let to = d.from;
+  if (shift > 0) for (let i = d.from + 1; i < d.rects.length && mid(d.rects[i]) < r0.bottom + shift; i++) to = i;
+  if (shift < 0) for (let i = d.from - 1; i >= 0 && mid(d.rects[i]) > r0.top + shift; i--) to = i;
   if (to !== d.to) {
     d.to = to;
     tg.hapticSelection();
