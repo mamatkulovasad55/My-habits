@@ -204,10 +204,10 @@ function viewToday() {
     ${state.reorder ? reorderList() : `
     ${due.length ? `<section class="list">${due.map((h) => habitCard(h, day)).join('')}</section>` : ''}
     ${other.length ? `<h3 class="section-title">Не по расписанию</h3><section class="list is-dim">${other.map((h) => habitCard(h, day)).join('')}</section>` : ''}
-    ${habits.length > 1 ? `<div class="list-tools"><button class="link-btn small" data-action="reorder">Изменить порядок</button>${isToday ? `<button class="link-btn small" data-action="checkin">🌙 Вечерний чек-ин</button>` : ''}</div>` : ''}
 `}
     ${empty}
     ${state.reorder ? '' : `<div class="today-actions">
+      ${isToday ? '<button class="today-btn" data-action="checkin">Вечерний чек-ин</button>' : ''}
       <button class="today-btn" data-action="add-habit">Новая привычка</button>
     </div>`}
     ${isToday && !state.reorder ? homeHint() : ''}

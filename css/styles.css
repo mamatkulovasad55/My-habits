@@ -1032,8 +1032,6 @@ select.field.compact { padding-right: 30px; }
 .next-stage { color: var(--label); font-weight: 500; }
 .hcard.is-done .next-stage { color: var(--label-2); }
 
-.list-tools { display: flex; justify-content: space-between; gap: 12px; padding: 4px 4px 0; }
-.list-tools .link-btn { min-height: 44px; }
 
 .banner { border: 1px solid color-mix(in srgb, var(--green) 35%, transparent); }
 .banner-title { font-weight: 600; font-size: var(--ios-headline); letter-spacing: var(--ios-headline-ls); line-height: var(--ios-headline-lh); }
