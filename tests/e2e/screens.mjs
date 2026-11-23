@@ -63,6 +63,7 @@ async function openApp(b, scheme, { locked = false, home = 'unsupported', days =
   if (locked) remote.settings.privacy = { ...remote.settings.privacy, enabled: true };
   const errors = [];
   const backups = [];
+  const codes = []; // коды, ушедшие на /api/lock/verify
   let backupFails = false;
   let backupDelay = 0;
   await ctx.route('https://telegram.org/**', (r) => r.fulfill({ body: '', contentType: 'text/javascript' }));
@@ -80,6 +81,7 @@ async function openApp(b, scheme, { locked = false, home = 'unsupported', days =
       if (backupFails) return r.fulfill({ status: 502, json: { error: 'Telegram не принял файл, попробуй позже' } });
       return r.fulfill({ json: { ok: true, events: 0, at: Date.now() } });
     }
+    if (path === '/api/lock/verify') codes.push(body.code);
     if (path === '/api/lock/verify') return r.fulfill({ json: { ok: false, reason: 'wrong', hasCode: true, retryIn: 0, error: 'Неверный код' } });
     return r.fulfill({ json: {} });
   });
@@ -103,7 +105,7 @@ async function openApp(b, scheme, { locked = false, home = 'unsupported', days =
   await p.goto(BASE);
   await p.waitForSelector('#view > *');
   await p.waitForTimeout(800);
-  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v), slowBackup: (ms) => (backupDelay = ms), remoteSettings: () => remote.settings };
+  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v), slowBackup: (ms) => (backupDelay = ms), remoteSettings: () => remote.settings, codes };
 }
 
 /** Перейти на раздел с чистого листа (открытые шторки закрываются). */
@@ -120,6 +122,15 @@ const shot = async (p, name) => {
   await p.screenshot({ path: join(OUT, `${name}.png`) });
 };
 const overflowX = (p) => p.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+/** Видимые поля ввода мельче 16px (iOS приближает их при фокусе). */
+const smallInputs = (p) =>
+  p.evaluate(() =>
+    [...document.querySelectorAll('input:not([type=checkbox]):not([type=file]):not([hidden]), textarea, select')]
+      .filter((e) => e.getClientRects().length)
+      .map((e) => [e.className || e.type, parseFloat(getComputedStyle(e).fontSize)])
+      .filter(([, px]) => px < 16)
+      .map(([c, px]) => `${c} ${px}px`),
+  );
 const text = (p, sel) => p.locator(sel).first().innerText().catch(() => '');
 
 /** Зона нажатия: точки в 3 px за каждым краем элемента попадают в него самого. → список элементов, где не так. */
@@ -156,6 +167,35 @@ for (const scheme of ['light', 'dark']) {
   ok(!smallToday.length, `кнопки нажимаются в зоне 44×44${smallToday.length ? `: ${smallToday.join(', ')}` : ''}`);
   ok((await overflowX(p)) <= 0, 'без горизонтальной прокрутки');
   await shot(p, `today-${scheme}`);
+
+  console.log('Без масштабирования');
+  {
+    const vp = await p.evaluate(() => [...document.querySelectorAll('meta[name=viewport]')].map((m) => m.content));
+    ok(vp.length === 1 && vp[0] === 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover', 'viewport: один тег, без масштабирования');
+    const ta = await p.evaluate(() => ['body', '.tabbar a', '.hcard .act', '.page-head .icon-btn', '.day', '.list-tools .link-btn'].map((q) => [q, document.querySelector(q) && getComputedStyle(document.querySelector(q)).touchAction]));
+    const badTa = ta.filter(([, v]) => v !== 'manipulation');
+    ok(!badTa.length, `touch-action: manipulation на «Сегодня»${badTa.length ? `: ${badTa.map((x) => x.join('=')).join(', ')}` : ''}`);
+    let small = await smallInputs(p);
+    for (const sub of ['reminders', 'routine', 'prayer', 'data', 'city']) {
+      await go(p, `profile/${sub}`);
+      small = small.concat((await smallInputs(p)).map((x) => `${sub}: ${x}`));
+    }
+    await go(p, 'today');
+    await p.click('.page-head [data-action=add-habit]');
+    await p.waitForSelector('.sheet input');
+    await p.waitForTimeout(300);
+    const sheetTa = await p.evaluate(() => getComputedStyle(document.querySelector('.sheet .sheet-body button, .sheet .sheet-body input')).touchAction);
+    small = small.concat((await smallInputs(p)).map((x) => `редактор: ${x}`));
+    ok(!small.length, `поля ввода не мельче 16px${small.length ? `: ${small.join(', ')}` : ''}`);
+    ok(sheetTa === 'manipulation', 'внутри прокручиваемой шторки — тоже manipulation');
+    await go(p, 'stats');
+    const hmTa = await p.evaluate(() => getComputedStyle(document.querySelector('.heatmap-scroll svg') || document.body).touchAction);
+    ok(hmTa === 'manipulation', 'карта года (горизонтальная прокрутка) — manipulation');
+    await p.mouse.move(195, 400);
+    await p.mouse.wheel(0, 600);
+    await p.waitForTimeout(300);
+    ok((await p.evaluate(() => scrollY)) > 0, 'вертикальная прокрутка работает');
+  }
 
   console.log('Детокс');
   await go(p, 'abstain');
@@ -380,6 +420,11 @@ for (const scheme of ['light', 'dark']) {
   ok((await lock.p.locator('#view h1').count()) === 0, 'без заголовка раздела');
   ok((await text(lock.p, '.lock-screen h2')) === 'Раздел защищён', '«Раздел защищён»');
   ok((await lock.p.locator('.pin-key[data-pin]').count()) === 11, 'клавиатура: 10 цифр и «Стереть»');
+  ok((await lock.p.evaluate(() => getComputedStyle(document.querySelector('.pin-key')).touchAction)) === 'manipulation', 'клавиши PIN: touch-action: manipulation');
+  // быстрый ввод «1-1-1-1»: тапы подряд без пауз — все четыре цифры
+  for (let i = 0; i < 4; i++) await lock.p.tap('.lock-screen .pin-key[data-pin="1"]');
+  await lock.p.waitForTimeout(500);
+  ok(lock.codes.at(-1) === '1111', `быстрый ввод «1-1-1-1» — ушёл код 1111${lock.codes.length ? ` (${lock.codes.join(', ')})` : ''}`);
   await shot(lock.p, `lock-${scheme}`);
   // «Данные» при защите: переключатель неактивен, опасные действия и импорт — только по коду
   await go(lock.p, 'profile/data');
