@@ -446,13 +446,12 @@ function dragEnd() {
   d.card.classList.add('is-dropping');
   d.card.style.transform = `translateY(${off}px)`;
   tg.haptic('light');
-  const ids = d.cards.map((c) => c.dataset.hid);
-  const moved = d.to !== d.from;
-  if (moved) ids.splice(d.to, 0, ids.splice(d.from, 1)[0]);
-  d.done = setTimeout(() => {
-    dragFinish();
-    if (moved) reorderHabits(mergeVisibleOrder(habitsAll().map((h) => h.id), ids));
-  }, DRAG.ANIM + 20);
+  // результат решён в момент отпускания: касание или сворачивание во время анимации его не отменяют
+  if (d.to !== d.from) {
+    d.ids = d.cards.map((c) => c.dataset.hid);
+    d.ids.splice(d.to, 0, d.ids.splice(d.from, 1)[0]);
+  }
+  d.done = setTimeout(dragFinish, DRAG.ANIM + 20);
 }
 
 /** Снять стили жеста. Порядок карточек в DOM не менялся — без сохранения всё как было. */
@@ -467,16 +466,21 @@ function dragFinish() {
   d.list?.classList.remove('is-sorting');
   d.card?.classList.remove('is-lifted', 'is-dropping');
   (d.cards || [d.card]).forEach((c) => c && (c.style.transform = ''));
+  if (d.phase === 'drop' && d.ids) {
+    dragRenderPending = false;
+    reorderHabits(mergeVisibleOrder(habitsAll().map((h) => h.id), d.ids)); // перерисовка — через subscribe
+    return;
+  }
   if (dragRenderPending) {
     dragRenderPending = false;
     render();
   }
 }
 
-/** touchcancel, сворачивание Mini App: вернуть исходный порядок, ничего не сохранять. */
+/** touchcancel, сворачивание Mini App: поднятая карточка возвращается, ничего не сохраняется. Уже отпущенная (drop) — сохраняется. */
 function dragCancel() {
   if (!drag) return;
-  if (drag.phase === 'lifted' || drag.phase === 'drop') suppressClickUntil = Date.now() + 600;
+  if (drag.phase === 'lifted') suppressClickUntil = Date.now() + 600; // палец ещё может «кликнуть» при отпускании
   dragFinish();
 }
 

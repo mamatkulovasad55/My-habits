@@ -304,13 +304,16 @@ for (const scheme of ['light', 'dark']) {
     await q.waitForTimeout(250);
     const scrolled = await q.evaluate(() => scrollY);
     await touch('touchEnd');
+    const sum = await center('.summary');
+    await touch('touchStart', sum.x, sum.y); // сразу после отпускания — новое касание (во время анимации)
+    await touch('touchEnd');
     await q.waitForTimeout(700);
     const after = await order();
-    ok(after[0] === before[1] && after[1] === before[0], `порядок после перетаскивания: ${after.join(', ')}`);
+    ok(after[0] === before[1] && after[1] === before[0], `порядок после перетаскивания (и касания сразу после): ${after.join(', ')}`);
     ok((await doneCount()) === done0, 'после перетаскивания ничего не отмечено');
     const hap = await q.evaluate(() => __hap);
     ok(hap[0] === 'medium' && hap.includes('sel') && hap.includes('light'), `вибрация: ${hap.join(', ')}`);
-    ok(scrolled === scroll0, `страница не прокручивалась при поднятой карточке (${scroll0} → ${scrolled})`);
+    ok(scrolled === scroll0, `страница стоит при ведении вниз (${scroll0} → ${scrolled})`);
     await q.waitForTimeout(2200); // синхронизация
     const r = app.remote();
     const ord = (id) => r.habits.find((h) => h.id === id).order;
@@ -338,11 +341,64 @@ for (const scheme of ['light', 'dark']) {
     await q.waitForTimeout(500);
     ok((await order()).join() === mid.join(), 'сворачивание Mini App: исходный порядок');
 
-    // обычный тап по ✓ работает как раньше
-    const gym = await center('.hcard[data-hid="gym"] .act');
-    await q.mouse.click(gym.x, gym.y);
+    const sheets = () => q.locator('.sheet').count();
+    const gymDone = () => q.locator('.hcard[data-hid="gym"] .act.is-done').count();
+
+    // удержание на ✓ без движения и отпускание: не отмечает, шторка не открывается
+    let gym = await center('.hcard[data-hid="gym"] .act');
+    await touch('touchStart', gym.x, gym.y);
+    await q.waitForTimeout(470);
+    await touch('touchEnd');
     await q.waitForTimeout(500);
-    ok((await q.locator('.hcard[data-hid="gym"] .act.is-done').count()) === 1, 'тап по ✓ без удержания отмечает');
+    ok((await gymDone()) === 0 && (await sheets()) === 0, 'удержание на ✓ и отпускание: не отмечено, ничего не открылось');
+
+    // мышь (Telegram Desktop): удержание + небольшое движение + отпускание — клика нет
+    const card = await center('.hcard[data-hid="gym"] .hname');
+    await q.mouse.move(card.x, card.y);
+    await q.mouse.down();
+    await q.waitForTimeout(470);
+    ok((await q.locator('.hcard.is-lifted').count()) === 1, 'мышь: удержание поднимает карточку');
+    await q.mouse.move(card.x, card.y + 5);
+    await q.mouse.up();
+    await q.waitForTimeout(500);
+    ok((await gymDone()) === 0 && (await sheets()) === 0, 'мышь: после удержания клик не срабатывает');
+
+    // ведение вверх на прокрученной странице: страница не уезжает
+    await q.evaluate(() => scrollTo(0, 120));
+    await q.waitForTimeout(150);
+    const sy0 = await q.evaluate(() => scrollY);
+    const cur = await order();
+    const last = await center(`.hcard[data-hid="${cur[cur.length - 1]}"]`);
+    await touch('touchStart', last.x, last.y);
+    await q.waitForTimeout(470);
+    for (let y = last.y; y >= last.y - last.h * 0.4; y -= 8) await touch('touchMove', last.x, y);
+    await q.waitForTimeout(150);
+    const sy1 = await q.evaluate(() => scrollY);
+    await touch('touchCancel');
+    await q.waitForTimeout(400);
+    ok(sy0 > 0 && sy1 === sy0, `страница не прокручивается, пока карточка поднята (${sy0} → ${sy1})`);
+
+    // автопрокрутка: палец у таб-бара — список едет сам
+    await q.evaluate(() => scrollTo(0, 0));
+    await q.waitForTimeout(150);
+    const first = await center(`.hcard[data-hid="${cur[0]}"]`);
+    const barTop = await q.evaluate(() => document.querySelector('.tabbar').getBoundingClientRect().top);
+    await touch('touchStart', first.x, first.y);
+    await q.waitForTimeout(470);
+    for (let y = first.y; y <= barTop - 10; y += 16) await touch('touchMove', first.x, y);
+    await q.waitForTimeout(400);
+    const auto = await q.evaluate(() => scrollY);
+    await touch('touchCancel');
+    await q.waitForTimeout(400);
+    ok(auto > 0, `автопрокрутка у таб-бара (scrollY ${auto})`);
+    ok((await order()).join() === cur.join(), 'после отмены порядок прежний');
+
+    // обычный тап по ✓ (тачскрин) работает как раньше
+    await q.evaluate(() => scrollTo(0, 0));
+    gym = await center('.hcard[data-hid="gym"] .act');
+    await q.touchscreen.tap(gym.x, gym.y);
+    await q.waitForTimeout(500);
+    ok((await gymDone()) === 1, 'тап по ✓ без удержания отмечает');
 
     // перезапуск — порядок сохранён
     await q.reload();
