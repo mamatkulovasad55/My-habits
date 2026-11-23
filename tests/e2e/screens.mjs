@@ -57,10 +57,11 @@ function seed() {
 
 /** home — ответ checkHomeScreenStatus ('missed' | 'unknown' | 'added' | 'unsupported'), days — сколько разных дней открывали приложение. */
 /** compass — курс телефона в градусах для замоканного WebApp.DeviceOrientation (absolute); null — датчика нет. */
-async function openApp(b, scheme, { locked = false, home = 'unsupported', days = 1, compass = null } = {}) {
+async function openApp(b, scheme, { locked = false, home = 'unsupported', days = 1, compass = null, tweak = null } = {}) {
   const ctx = await b.newContext({ ...devices['iPhone 13'], viewport: { width: 390, height: 740 }, colorScheme: scheme, locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   let remote = seed();
   if (locked) remote.settings.privacy = { ...remote.settings.privacy, enabled: true };
+  if (tweak) tweak(remote);
   const errors = [];
   const backups = [];
   const codes = []; // коды, ушедшие на /api/lock/verify
@@ -105,7 +106,7 @@ async function openApp(b, scheme, { locked = false, home = 'unsupported', days =
   await p.goto(BASE);
   await p.waitForSelector('#view > *');
   await p.waitForTimeout(800);
-  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v), slowBackup: (ms) => (backupDelay = ms), remoteSettings: () => remote.settings, codes };
+  return { ctx, p, errors, backups, failBackup: (v) => (backupFails = v), slowBackup: (ms) => (backupDelay = ms), remoteSettings: () => remote.settings, remote: () => remote, codes };
 }
 
 /** Перейти на раздел с чистого листа (открытые шторки закрываются). */
@@ -163,7 +164,7 @@ for (const scheme of ['light', 'dark']) {
   ok((await text(p, '#view h1')) === 'Сегодня', 'заголовок «Сегодня»');
   ok((await p.locator('.summary').count()) === 1, 'сводка дня');
   ok((await p.locator('.hcard').count()) >= 2, 'карточки привычек');
-  const smallToday = await smallTargets(p, '.page-head .icon-btn, .hcard .act, .list-tools .link-btn');
+  const smallToday = await smallTargets(p, '.page-head .icon-btn, .hcard .act, .today-btn');
   ok(!smallToday.length, `кнопки нажимаются в зоне 44×44${smallToday.length ? `: ${smallToday.join(', ')}` : ''}`);
   ok((await overflowX(p)) <= 0, 'без горизонтальной прокрутки');
   await shot(p, `today-${scheme}`);
@@ -172,7 +173,7 @@ for (const scheme of ['light', 'dark']) {
   {
     const vp = await p.evaluate(() => [...document.querySelectorAll('meta[name=viewport]')].map((m) => m.content));
     ok(vp.length === 1 && vp[0] === 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover', 'viewport: один тег, без масштабирования');
-    const ta = await p.evaluate(() => ['body', '.tabbar a', '.hcard .act', '.page-head .icon-btn', '.day', '.list-tools .link-btn'].map((q) => [q, document.querySelector(q) && getComputedStyle(document.querySelector(q)).touchAction]));
+    const ta = await p.evaluate(() => ['body', '.tabbar a', '.hcard .act', '.page-head .icon-btn', '.day', '.today-btn'].map((q) => [q, document.querySelector(q) && getComputedStyle(document.querySelector(q)).touchAction]));
     const badTa = ta.filter(([, v]) => v !== 'manipulation');
     ok(!badTa.length, `touch-action: manipulation на «Сегодня»${badTa.length ? `: ${badTa.map((x) => x.join('=')).join(', ')}` : ''}`);
     let small = await smallInputs(p);
@@ -181,7 +182,7 @@ for (const scheme of ['light', 'dark']) {
       small = small.concat((await smallInputs(p)).map((x) => `${sub}: ${x}`));
     }
     await go(p, 'today');
-    await p.click('.page-head [data-action=add-habit]');
+    await p.click('.today-btn[data-action=add-habit]');
     await p.waitForSelector('.sheet input');
     await p.waitForTimeout(300);
     const sheetTa = await p.evaluate(() => getComputedStyle(document.querySelector('.sheet .sheet-body button, .sheet .sheet-body input')).touchAction);
@@ -195,6 +196,226 @@ for (const scheme of ['light', 'dark']) {
     await p.mouse.wheel(0, 600);
     await p.waitForTimeout(300);
     ok((await p.evaluate(() => scrollY)) > 0, 'вертикальная прокрутка работает');
+  }
+
+  console.log('Сегодня: меньше текста, нижние кнопки');
+  {
+    await go(p, 'today');
+    const html = await p.evaluate(() => document.getElementById('view').innerText);
+    ok(!(await p.locator('#day-note').count()) && !/Заметка дня|Изменить порядок|🌙/i.test(html), 'нет заметки дня, «Изменить порядок» и 🌙');
+    ok(!(await p.locator('.page-head [data-action=add-habit]').count()), 'в шапке нет «+»');
+    ok((await p.locator('.page-head .head-actions .icon-btn').count()) === 2, 'в шапке — кибла и зикр');
+    const btns = await p.evaluate(() => [...document.querySelectorAll('.today-actions .today-btn')].map((b) => {
+      const r = b.getBoundingClientRect();
+      const cs = getComputedStyle(b);
+      return { t: b.textContent.trim(), h: Math.round(r.height), w: Math.round(r.width), radius: parseFloat(cs.borderTopLeftRadius), fs: cs.fontSize, fw: cs.fontWeight };
+    }));
+    ok(btns.map((b) => b.t).join(' / ') === 'Вечерний чек-ин / Новая привычка', `нижние кнопки: ${btns.map((b) => b.t).join(' / ')}`);
+    const listW = await p.evaluate(() => Math.round(document.querySelector('.list').getBoundingClientRect().width));
+    ok(btns.every((b) => b.h === 50 && b.w === listW && b.radius >= 25 && b.fs === '17px' && b.fw === '600'), `кнопки 50 px, во всю ширину, капсула, 17 semibold (${JSON.stringify(btns[0])})`);
+    const gaps = await p.evaluate(() => {
+      const lists = document.querySelectorAll('.list');
+      const last = lists[lists.length - 1].getBoundingClientRect();
+      const [a, b] = [...document.querySelectorAll('.today-btn')].map((x) => x.getBoundingClientRect());
+      return [Math.round(a.top - last.bottom), Math.round(b.top - a.bottom)];
+    });
+    ok(gaps[0] === 24 && gaps[1] === 12, `отступы 24 / 12 (${gaps})`);
+    await p.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+    await p.waitForTimeout(200);
+    const clear = await p.evaluate(() => {
+      const btns = document.querySelectorAll('.today-btn');
+      return document.querySelector('.tabbar').getBoundingClientRect().top - btns[btns.length - 1].getBoundingClientRect().bottom;
+    });
+    ok(clear >= 16, `последняя кнопка над таб-баром (${Math.round(clear)} px)`);
+    await p.click('.today-btn[data-action=checkin]');
+    await p.waitForTimeout(400);
+    ok((await text(p, '.sheet .sheet-header strong')) === 'Вечерний чек-ин', '«Вечерний чек-ин» открывает чек-ин (заметка дня там)');
+    ok((await p.locator('.sheet .note-input').count()) === 1, 'заметка дня — в чек-ине');
+    await go(p, 'today');
+    await p.click('.today-btn[data-action=add-habit]');
+    await p.waitForSelector('.sheet input');
+    ok(true, '«Новая привычка» открывает редактор');
+    await go(p, 'today');
+    await p.click('[data-action=select-day][data-day="2026-11-15"]');
+    await p.waitForTimeout(300);
+    ok((await p.locator('.today-btn').allInnerTexts()).join() === 'Новая привычка', 'прошлый день: только «Новая привычка»');
+  }
+
+  if (scheme === 'light') {
+    console.log('Порядок удержанием карточки');
+    const app = await openApp(browser, scheme, {
+      tweak: (d) => {
+        d.habits.push({ id: 'fri', name: 'По пятницам', emoji: '📖', color: '#0a84ff', type: 'check', createdAt: d.habits[0].createdAt, updatedAt: 1, order: 2.5, schedule: { kind: 'weekdays', days: [5] } });
+        d.notes = { ...(d.notes || {}), '2026-11-15': { text: 'старая заметка', updatedAt: 1 } };
+      },
+    });
+    const q = app.p;
+    await q.setViewportSize({ width: 375, height: 740 });
+    await go(q, 'today');
+    await q.evaluate(() => {
+      window.__hap = [];
+      window.Telegram.WebApp.HapticFeedback = { impactOccurred: (k) => __hap.push(k), selectionChanged: () => __hap.push('sel'), notificationOccurred: (k) => __hap.push(k) };
+    });
+    const cdp = await app.ctx.newCDPSession(q);
+    const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' || type === 'touchCancel' ? [] : [{ x, y }] });
+    const order = () => q.evaluate(() => [...document.querySelectorAll('.list:not(.is-dim) .hcard')].map((c) => c.dataset.hid));
+    const doneCount = () => q.evaluate(() => document.querySelectorAll('.hcard .is-done, .hcard.is-done').length);
+    const center = (sel) => q.evaluate((sel) => {
+      const r = document.querySelector(sel).getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height };
+    }, sel);
+    const before = await order();
+    const done0 = await doneCount();
+    ok(before.length >= 3, `видимые карточки: ${before.join(', ')}`);
+    ok((await q.evaluate(() => getComputedStyle(document.querySelector('.hcard')).userSelect)) === 'none', 'текст карточки не выделяется');
+    ok(await q.evaluate(() => {
+      const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      document.querySelector('.hcard').dispatchEvent(e);
+      return e.defaultPrevented;
+    }), 'долгое нажатие: системное меню отменено');
+
+    // быстрый свайп (30 px за 100 мс): жест не запускается
+    let c = await center(`.hcard[data-hid="${before[0]}"]`);
+    await touch('touchStart', c.x, c.y);
+    for (let i = 1; i <= 3; i++) await touch('touchMove', c.x, c.y + i * 10);
+    await q.waitForTimeout(500);
+    ok(!(await q.locator('.hcard.is-lifted').count()), 'быстрая прокрутка не поднимает карточку');
+    await touch('touchEnd');
+    await q.waitForTimeout(300);
+    ok((await order()).join() === before.join(), 'порядок прежний после свайпа');
+
+    // удержание + ведение вниз на одну карточку + отпускание: порядок меняется, отметки нет
+    await q.evaluate(() => (__hap.length = 0));
+    c = await center(`.hcard[data-hid="${before[0]}"]`);
+    const scroll0 = await q.evaluate(() => scrollY);
+    const c2 = await center(`.hcard[data-hid="${before[1]}"]`);
+    await touch('touchStart', c.x, c.y);
+    await q.waitForTimeout(470);
+    ok((await q.locator('.hcard.is-lifted').count()) === 1, 'удержание 400 мс поднимает карточку');
+    const lifted = await q.evaluate(() => getComputedStyle(document.querySelector('.hcard.is-lifted')).transform);
+    ok(/matrix\(1\.03/.test(lifted), `карточка увеличена (${lifted})`);
+    await q.screenshot({ path: join(OUT, 'today-drag-light.png') });
+    const target = c2.y + c2.h / 2 + 8;
+    for (let y = c.y; y <= target; y += 12) {
+      await touch('touchMove', c.x, y);
+      await q.waitForTimeout(16);
+    }
+    await touch('touchMove', c.x, target);
+    await q.waitForTimeout(250);
+    const scrolled = await q.evaluate(() => scrollY);
+    await touch('touchEnd');
+    const sum = await center('.summary');
+    await touch('touchStart', sum.x, sum.y); // сразу после отпускания — новое касание (во время анимации)
+    await touch('touchEnd');
+    await q.waitForTimeout(700);
+    const after = await order();
+    ok(after[0] === before[1] && after[1] === before[0], `порядок после перетаскивания (и касания сразу после): ${after.join(', ')}`);
+    ok((await doneCount()) === done0, 'после перетаскивания ничего не отмечено');
+    const hap = await q.evaluate(() => __hap);
+    ok(hap[0] === 'medium' && hap.includes('sel') && hap.includes('light'), `вибрация: ${hap.join(', ')}`);
+    ok(scrolled === scroll0, `страница стоит при ведении вниз (${scroll0} → ${scrolled})`);
+    await q.waitForTimeout(2200); // синхронизация
+    const r = app.remote();
+    const ord = (id) => r.habits.find((h) => h.id === id).order;
+    ok(ord(before[1]) < ord(before[0]), 'новый порядок ушёл на сервер');
+    const all = [...r.habits].filter((h) => !h.deleted).sort((a, b) => a.order - b.order).map((h) => h.id);
+    ok(all.indexOf('fri') === 2, `привычка не по расписанию на прежнем месте (${all.join(', ')})`);
+    ok(r.notes?.['2026-11-15']?.text === 'старая заметка', 'старые заметки на месте');
+
+    // touchcancel посреди жеста: откат, ничего не сохранено
+    const mid = await order();
+    c = await center(`.hcard[data-hid="${mid[0]}"]`);
+    await touch('touchStart', c.x, c.y);
+    await q.waitForTimeout(470);
+    for (let y = c.y; y <= c.y + c.h * 1.5; y += 12) await touch('touchMove', c.x, y);
+    await touch('touchCancel');
+    await q.waitForTimeout(500);
+    ok((await order()).join() === mid.join() && !(await q.locator('.hcard.is-lifted, .hcard[style*=translate]').count()), 'touchcancel: исходный порядок, стили сняты');
+
+    // сворачивание посреди жеста: откат
+    await touch('touchStart', c.x, c.y);
+    await q.waitForTimeout(470);
+    for (let y = c.y; y <= c.y + c.h * 1.5; y += 12) await touch('touchMove', c.x, y);
+    await q.evaluate(() => (window.__home.h.deactivated || []).forEach((fn) => fn()));
+    await touch('touchEnd');
+    await q.waitForTimeout(500);
+    ok((await order()).join() === mid.join(), 'сворачивание Mini App: исходный порядок');
+
+    const sheets = () => q.locator('.sheet').count();
+    const gymDone = () => q.locator('.hcard[data-hid="gym"] .act.is-done').count();
+
+    // удержание на ✓ без движения и отпускание: не отмечает, шторка не открывается
+    let gym = await center('.hcard[data-hid="gym"] .act');
+    await touch('touchStart', gym.x, gym.y);
+    await q.waitForTimeout(470);
+    await touch('touchEnd');
+    await q.waitForTimeout(500);
+    ok((await gymDone()) === 0 && (await sheets()) === 0, 'удержание на ✓ и отпускание: не отмечено, ничего не открылось');
+
+    // мышь (Telegram Desktop): удержание + небольшое движение + отпускание — клика нет
+    const card = await center('.hcard[data-hid="gym"] .hname');
+    await q.mouse.move(card.x, card.y);
+    await q.mouse.down();
+    await q.waitForTimeout(470);
+    ok((await q.locator('.hcard.is-lifted').count()) === 1, 'мышь: удержание поднимает карточку');
+    await q.mouse.move(card.x, card.y + 5);
+    await q.mouse.up();
+    await q.waitForTimeout(500);
+    ok((await gymDone()) === 0 && (await sheets()) === 0, 'мышь: после удержания клик не срабатывает');
+
+    // ведение вверх на прокрученной странице: страница не уезжает
+    await q.evaluate(() => scrollTo(0, 120));
+    await q.waitForTimeout(150);
+    const sy0 = await q.evaluate(() => scrollY);
+    const cur = await order();
+    const last = await center(`.hcard[data-hid="${cur[cur.length - 1]}"]`);
+    await touch('touchStart', last.x, last.y);
+    await q.waitForTimeout(470);
+    for (let y = last.y; y >= last.y - last.h * 0.4; y -= 8) await touch('touchMove', last.x, y);
+    await q.waitForTimeout(150);
+    const sy1 = await q.evaluate(() => scrollY);
+    await touch('touchCancel');
+    await q.waitForTimeout(400);
+    ok(sy0 > 0 && sy1 === sy0, `страница не прокручивается, пока карточка поднята (${sy0} → ${sy1})`);
+
+    // автопрокрутка: палец у таб-бара — список едет сам
+    await q.evaluate(() => scrollTo(0, 0));
+    await q.waitForTimeout(150);
+    const first = await center(`.hcard[data-hid="${cur[0]}"]`);
+    const barTop = await q.evaluate(() => document.querySelector('.tabbar').getBoundingClientRect().top);
+    await touch('touchStart', first.x, first.y);
+    await q.waitForTimeout(470);
+    for (let y = first.y; y <= barTop - 10; y += 16) await touch('touchMove', first.x, y);
+    await q.waitForTimeout(400);
+    const auto = await q.evaluate(() => scrollY);
+    await touch('touchCancel');
+    await q.waitForTimeout(400);
+    ok(auto > 0, `автопрокрутка у таб-бара (scrollY ${auto})`);
+    ok((await order()).join() === cur.join(), 'после отмены порядок прежний');
+
+    // обычный тап по ✓ (тачскрин) работает как раньше
+    await q.evaluate(() => scrollTo(0, 0));
+    gym = await center('.hcard[data-hid="gym"] .act');
+    await q.touchscreen.tap(gym.x, gym.y);
+    await q.waitForTimeout(500);
+    ok((await gymDone()) === 1, 'тап по ✓ без удержания отмечает');
+
+    // перезапуск — порядок сохранён
+    await q.reload();
+    await q.waitForSelector('#view > *');
+    await q.waitForTimeout(600);
+    ok((await order()).join() === mid.join(), 'порядок сохранён после перезапуска');
+    ok(!app.errors.length, `без ошибок JS${app.errors.length ? `: ${app.errors.join(' | ')}` : ''}`);
+    await app.ctx.close();
+  }
+
+  {
+    const app = await openApp(browser, scheme, { tweak: (d) => (d.habits = []) });
+    await go(app.p, 'today');
+    ok((await app.p.locator('.empty').count()) === 1 && !(await app.p.locator('.empty button').count()), 'пустой список: заглушка без своей кнопки');
+    ok((await app.p.locator('.today-btn').allInnerTexts()).join(' / ') === 'Вечерний чек-ин / Новая привычка', 'пустой список: обе нижние кнопки видны');
+    await app.p.screenshot({ path: join(OUT, `today-empty-${scheme}.png`) });
+    await app.ctx.close();
   }
 
   console.log('Детокс');
